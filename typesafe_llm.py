@@ -22,6 +22,7 @@ import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from http.client import HTTPException
 from pathlib import Path
 from typing import Any, Protocol, TextIO
 from urllib.error import HTTPError, URLError
@@ -88,7 +89,7 @@ class TypeSafeHTTP:
         self._opener = build_opener(NoRedirect())
 
     def _request(self, path: str, payload: dict[str, Any] | None) -> APIResult:
-        data = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        data = None if payload is None else json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
         request = Request(
             self.base_url + path, data=data,
             method="GET" if payload is None else "POST",
@@ -106,7 +107,10 @@ class TypeSafeHTTP:
                 request_id = response.headers.get("x-typesafe-request-id")
         except HTTPError as exc:
             with exc:
-                excerpt = exc.read(1500).decode("utf-8", errors="replace")
+                try:
+                    excerpt = exc.read(1500).decode("utf-8", errors="replace")
+                except (HTTPException, OSError):
+                    excerpt = "(response body could not be read)"
             excerpt = excerpt.replace(self._key, "[REDACTED]")
             hints = {
                 401: "Check TYPESAFE_API_KEY.",
@@ -117,7 +121,7 @@ class TypeSafeHTTP:
             }
             hint = hints.get(exc.code, "The request was not retried.")
             raise APIError(f"HTTP {exc.code}. {hint} Response: {excerpt}") from None
-        except (URLError, OSError, ValueError) as exc:
+        except (HTTPException, URLError, OSError, ValueError) as exc:
             message = str(exc).replace(self._key, "[REDACTED]")
             raise APIError(f"Request failed (not retried): {message}") from None
         if len(raw) > MAX_RESPONSE_BYTES:

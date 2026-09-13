@@ -6,6 +6,7 @@ import io
 import json
 import math
 import random
+from http.client import IncompleteRead
 import tempfile
 import unittest
 from pathlib import Path
@@ -337,6 +338,32 @@ class HTTPTests(unittest.TestCase):
         with patch.object(client._opener, "open", side_effect=URLError("unreachable")) as opener:
             with self.assertRaises(m.APIError):
                 client.evaluate({})
+        self.assertEqual(opener.call_count, 1)
+
+    def test_truncated_response_is_reported_without_retry(self):
+        class Response(io.BytesIO):
+            headers = {}
+
+            def read(self, size=-1):
+                raise IncompleteRead(b'{"answers":', 100)
+
+        client = m.TypeSafeHTTP("secret-key", m.DEFAULT_BASE_URL, 3)
+        with patch.object(client._opener, "open", return_value=Response()) as opener:
+            with self.assertRaises(m.APIError):
+                client.list_models()
+        self.assertEqual(opener.call_count, 1)
+
+    def test_unreadable_http_error_body_keeps_status_and_no_retry(self):
+        class BrokenBody(io.BytesIO):
+            def read(self, size=-1):
+                raise IncompleteRead(b"", 100)
+
+        client = m.TypeSafeHTTP("secret-key", m.DEFAULT_BASE_URL, 3)
+        error = HTTPError("https://api.typesafe.ai/v1/systemone", 503, "down", {}, BrokenBody())
+        with patch.object(client._opener, "open", side_effect=error) as opener:
+            with self.assertRaises(m.APIError) as caught:
+                client.evaluate({})
+        self.assertIn("503", str(caught.exception))
         self.assertEqual(opener.call_count, 1)
 
     def test_redirect_is_blocked(self):

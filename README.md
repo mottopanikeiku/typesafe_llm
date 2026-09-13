@@ -1,9 +1,10 @@
 # TypeSafe autoregressive decoder
 
 An experimental text generator built from Jev's System One Choice evaluations.
-Each step presents the **complete candidate answer prefixes**, chooses one next
-character or optional text fragment, appends it to `answer_prefix`, and repeats.
-STOP is a separate choice. No other model proposes or repairs the answer.
+The default **word-guided decoder** asks Jev to rank dictionary continuations,
+then choose a shortlisted word, an original character/fragment, or STOP.
+Selected text is appended to `answer_prefix`, and the process repeats.
+No other model proposes the answer, and no spelling is repaired after selection.
 
 **Python 3.10+; no third-party packages or SDK installation required.**
 You need your own TypeSafe API key. The default model is `jev-latest`, as
@@ -18,15 +19,43 @@ can fail even on short tasks. Do not use generated text without checking it.
 
 ## How generation works
 
-For a prefix `co`, the choices describe candidate continuations such as `coa`,
-`cob`, and `coc`; STOP describes `co` as a complete answer. Jev compares these
-candidate prefixes against the original prompt and optional context.
+Every call resends the original prompt, optional task `context`, and the **full
+current `answer_prefix`**. Context is not forgotten between letters. There is no
+server-side conversation memory, automatic context truncation, or summarization.
 
-The local policy turns each returned Choice distribution into the next-token
-decision. Conditioning every step on all earlier selected text makes this an
-autoregressive process. These are probabilities over **our candidate set**, not
-Jev's native language-model vocabulary. Changing the alphabet, token fragments,
-instructions, or ordering changes the experiment.
+At the start of an answer or a word boundary, selection uses the original
+vocabulary first. Dictionary ranking begins only after an actual word prefix
+exists; this avoids seeding answers from an unrelated global-frequency shortlist.
+
+The default `--decoder lexical` uses two stages when lexical ranking is needed:
+
+1. Find up to 1,024 frequency-ranked dictionary continuations of the current
+   word. Ask independent Choice questions in groups of up to 128 over the same
+   actual state. The supplied 20,000-word English lexicon is independent of Jev
+   outputs and benchmark answers.
+2. Keep up to two candidates from each group. Ask a final Choice over those
+   candidates, **all original character/fragment options**, and STOP.
+
+For example, after `b`, a shortlisted word may offer the suffix `erlin`, producing
+the candidate prefix `berlin`. It is still Jev—not a lookup table of answers—that
+must select that candidate. Original options such as `a` remain selectable.
+Unknown words retain character fallback, and selected words are never split,
+rewritten, or automatically followed by spaces.
+
+Proposal probabilities are only used to rank candidates within their own groups;
+they are not averaged across groups or substituted for final Choice probabilities.
+Conditioning every selection on previous emitted text makes the process
+autoregressive. These are probabilities over **our candidate set**, not Jev's
+native vocabulary or a guarantee of correctness.
+
+Use `--decoder character` for the direct-selection baseline, without lexical
+ranking. Optional `--tokens-json` fragments work in either mode.
+
+Word guidance is an accuracy/latency tradeoff: it sends larger requests and often
+uses two calls per selection, so it can be substantially slower. It can still
+produce wrong facts, miss punctuation/capitalization, or choose bad fragments.
+The English lexicon is a proposal source, not a universal vocabulary or a trained
+language model. Shortlist truncation and corpus frequency introduce their own bias.
 
 TypeSafe's [public preview terms](https://typesafe.ai/terms) restrict use to
 evaluation and prohibit benchmark publication, distillation, and developing
@@ -77,8 +106,10 @@ python typesafe_llm.py 'What is the opposite of hot? One lowercase word.' --dry-
 
 The result contains the full HTTP body: `model`, `state`, and `questions`. In the
 playground, copy its `state` and `questions` values into the corresponding fields.
-No key is needed for `--dry-run`. A ready-made example is in
-`examples/first_request.json`.
+No key is needed for `--dry-run`. It prints the actual first request: normally
+original-vocabulary selection for an empty prefix, or word ranking for an existing
+word prefix. It never fabricates rankings or a final answer. `examples/first_request.json`
+is a smaller direct-selection example, corresponding to `--decoder character`.
 
 ### See each token's alternatives
 
@@ -130,6 +161,26 @@ A character file is a JSON string, or a JSON array of one-character strings.
 Duplicates are removed. STOP is always added. Unicode characters are supported
 by the wrapper, but live model support is unverified. Terminal escape/control
 characters other than tab/newline are rejected.
+
+### Compare word guidance with direct selection
+
+```bash
+python typesafe_llm.py 'What is the capital of Germany? Reply with one lowercase word.' --decoder lexical --max-calls 12 --max-new-chars 15 --verbose
+python typesafe_llm.py 'What is the capital of Germany? Reply with one lowercase word.' --decoder character --max-calls 12 --max-new-chars 15 --verbose
+```
+
+`--lexicon PATH` selects a custom JSON object with a nonempty `words` array.
+Words must contain lowercase ASCII letters only, ordered from most to least
+frequent. Matching continuations preserve an already capitalized/uppercase word
+prefix. The source file and SHA-256 are recorded in each run and benchmark plan.
+No file is downloaded or model trained at startup.
+
+The bundled `data/english_words.json` is adapted from Hermit Dave's
+[FrequencyWords / OpenSubtitles2018](https://github.com/hermitdave/FrequencyWords),
+under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+It retains the first 20,000 lowercase ASCII alphabetic entries in source frequency
+order, omitting counts and other entries. Attribution and transformations are also
+recorded in the data file. Do not build a lexicon from benchmark answers.
 
 ### Add multi-character fragments
 
@@ -197,22 +248,28 @@ Inspect a complete plan without a key or network calls:
 python benchmark.py --dry-run --repeats 2 --max-total-calls 7
 ```
 
-Run a small development comparison, then evaluate the untouched holdout suite:
+Run a development comparison, then evaluate the separate lexical validation suite:
 
 ```bash
 python benchmark.py examples/benchmark.json --max-total-calls 96 --max-calls 16 --max-new-chars 15 --seed 42
-python benchmark.py examples/holdout.json --max-total-calls 128 --max-calls 16 --max-new-chars 15 --seed 42
+python benchmark.py examples/lexical_holdout.json --max-total-calls 128 --max-calls 16 --max-new-chars 15 --seed 42
 ```
+
+`examples/holdout.json` retains the earlier diagnostic set. Its cases were later
+used during diagnosis, so it is no longer an unseen holdout for version 3.
+The lexical suite was initially held out, then reused to verify the word-boundary
+correction. Treat it as validation, not a fresh test set for subsequent tuning.
 
 Both commands require the environment key. Each has its **own** campaign budget.
 `--max-total-calls` caps attempts across every case and repetition, including
 failed attempts. Per-sample limits are clipped to the remaining shared budget.
 Errors and interruption stop the campaign; no retries or automatic resumption.
 
-Use `--repeats`, `--model`, `--temperature`, `--top-k`, `--top-p`,
-`--shuffle-options`, `--instructions-file`, and `--tokens-json` for controlled
-comparisons. Seeds control local policy and option ordering, not the server.
-Do not tune against the holdout and then describe it as unseen evaluation.
+Use `--decoder character` to compare the earlier policy, or `--lexicon` to select
+another independent vocabulary. Other controls include `--repeats`, `--model`,
+`--temperature`, `--top-k`, `--top-p`, `--shuffle-options`, `--instructions-file`,
+and `--tokens-json`. Seeds control local sampling and option order, not the server.
+Do not tune against a holdout and then describe it as unseen evaluation.
 
 Suite JSON contains `cases`, with explicit unique `id`, `prompt`, and an
 `expected` array of accepted full answers. Optional fields: `prefix`, `context`,
@@ -245,7 +302,7 @@ Each run creates a unique subfolder under `runs/` (change the parent using
 |---|---|
 | `answer.txt` | Initial prefix plus emitted text; atomically checkpointed after each token. |
 | `trace.jsonl` | Exact request/response bodies, request IDs, latency, and local decisions. |
-| `config.json` | Decoder/trace versions, prompt, prefix, context, vocabulary, instructions, policy, and seed. |
+| `config.json` | Decoder/trace versions, mode, lexicon source/hash, prompt, prefix, context, base vocabulary, instructions, policy, and seed. |
 | `summary.json` | Stop reason, attempts, responses, emitted tokens/characters, reported usage, and observed model versions. |
 
 The trace distinguishes the API-selected label from the locally selected label,
@@ -253,11 +310,12 @@ and raw Choice probabilities from the normalized/filtered decoding policy.
 Rounding can make raw values sum to something other than exactly one. That sum
 is retained; no corrected value silently replaces the original data.
 
-Trace schema 2 uses question id `next_token`. Decisions record `selected_text`
-and actual `emitted_text` separately. If a selected fragment would exceed the
-character cap, the decoder emits nothing and stops; it never splits the fragment,
-filters it out, or resamples to force a fit. The trace inspector can still inspect
-old character traces because the probability and decision-label fields remain.
+Trace schema 3 identifies `proposals` and `selection` request/response stages.
+Final decisions include the exact step vocabulary, `selected_text`, and actual
+`emitted_text`. Proposal winners do not themselves emit text. If a selected
+fragment would exceed the character cap, the decoder emits nothing and stops;
+it never splits or resamples the fragment. The inspector displays actual candidate
+text and can still inspect older character traces.
 
 Usage totals sum only reported values. `responses_missing_usage` identifies how
 many otherwise received responses omitted each token count. Failed/timed-out
@@ -280,10 +338,17 @@ the normalized Choice distribution. It is **not native next-token entropy**.
 
 ## Budgets, stopping, and errors
 
-One selected text token requires one successful evaluation request. STOP also
-requires a request but adds no text. Producing N tokens and observing STOP can
-therefore take N+1 requests. Each request resends the growing prefix and all
-candidate continuations. Start with short outputs.
+Direct selection uses one call per selected token or STOP. Word-guided selection
+uses a ranking call plus a final-selection call when there are word groups to
+rank; zero/singleton proposal groups do not need a ranking call. Both stages count
+toward the same budget. If fewer than two attempts remain for a two-stage step,
+generation stops without spending the last attempt on unusable proposals.
+
+Each request includes the growing prefix. Word-group descriptions repeat it many
+times, so long outputs can approach the provider's request-size limit sooner.
+No tokenizer-based context-window guard is available; API errors preserve prior
+output. Start with short outputs. `--timeout 90` can allow more time for large
+ranking requests without enabling retries.
 
 `--max-calls` is a hard cap on attempted generation HTTP calls, including failed
 calls. There are **no automatic retries or redirects**. A timeout, HTTP error,
@@ -311,9 +376,10 @@ Redirects are blocked instead of forwarding credentials elsewhere.
 
 ## Hacking the question itself
 
-`INSTRUCTIONS` in `typesafe_llm.py` holds the continuation-selection question. Change it
-in code, or supply a UTF-8 file through `--instructions-file`. The full text is
-recorded for every run. This can change the behavior substantially.
+`INSTRUCTIONS` holds the direct-selection and proposal-ranking question;
+`LEXICAL_INSTRUCTIONS` holds the final word-guided selection question.
+`--instructions-file` overrides **final selection only**, not word-group ranking.
+Instructions, exact requests, and local decisions are retained in the run trace.
 
 ## Tests and verification
 
@@ -331,6 +397,14 @@ Scripted evaluators and mocked HTTP responses are labeled offline fixtures;
 their outputs are not measurements of Jev. Live experiments use the real API
 and save separate local traces. Request/response contracts and model limitations
 are documented in [SOURCES.md](SOURCES.md).
+
+## Changes in 3.0
+
+- Default word-guided decoding with a fixed, attributed English frequency lexicon.
+- Model-ranked continuations without answer-specific rules or removal of characters.
+- Shared attempt/usage accounting across ranking and final selection.
+- Lexicon fingerprints, staged traces, and readable word alternatives.
+- Direct-selection comparison mode and fresh lexical holdout cases.
 
 ## Changes in 2.0
 

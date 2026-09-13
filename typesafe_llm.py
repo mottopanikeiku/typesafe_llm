@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Experimental character decoder for TypeSafe Jev. Python 3.10+, no dependencies.
+"""Experimental autoregressive decoder for TypeSafe Jev. Python 3.10+, no dependencies.
 
-One System One Choice request selects one character (or STOP). This is an
+One System One Choice request selects one text token (or STOP). This is an
 external decoding policy, NOT access to Jev's native next-token probabilities.
 
     export TYPESAFE_API_KEY='...'
@@ -28,10 +28,10 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-VERSION = "1.0.0"
+VERSION = "2.0.0"
 DEFAULT_BASE_URL = "https://api.typesafe.ai"
 DEFAULT_MODEL = "jev-latest"
-QUESTION_ID = "next_character"
+QUESTION_ID = "next_token"
 STOP = "STOP"
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 ALPHABETS = {
@@ -39,12 +39,13 @@ ALPHABETS = {
     "ascii": "".join(chr(i) for i in range(32, 127)) + "\n",
 }
 INSTRUCTIONS = (
-    "Select the next single character of a correct, concise answer to "
+    "Select the next text token of a correct, concise answer to "
     "`user_prompt`, using `context` as task data when present. "
     "`answer_prefix` is the answer already written. Continue it literally: "
     "it may end in the middle of a word. Do not restart, rewrite, or repeat "
-    "the prefix. Select the one character that should immediately follow it. "
-    "Use the available character choices. Choose STOP only when the existing "
+    "the prefix. A token is one character or a longer text fragment. "
+    "Select the token that should immediately follow the prefix, literally. "
+    "Use the available token choices. Choose STOP only when the existing "
     "prefix is already a complete answer. An empty prefix is not complete."
 )
 
@@ -97,7 +98,7 @@ class TypeSafeHTTP:
                 "Authorization": f"Bearer {self._key}",
                 "Accept": "application/json",
                 "Content-Type": "application/json",
-                "User-Agent": f"typesafe-character-decoder/{VERSION}",
+                "User-Agent": f"typesafe-autoregressive-decoder/{VERSION}",
             },
         )
         started = time.perf_counter()
@@ -138,8 +139,10 @@ class TypeSafeHTTP:
         return self._request("/v1/models", None)
 
 
-def make_vocabulary(characters: str) -> dict[str, str | None]:
-    """Map safe, human-readable labels to one character; None means STOP."""
+def make_vocabulary(
+    characters: str, tokens: list[str] | None = None,
+) -> dict[str, str | None]:
+    """Keep character fallback and optional exact text fragments; None means STOP."""
     special = {" ": "SPACE", "\n": "NEWLINE", "\t": "TAB", ".": "PERIOD"}
     vocabulary: dict[str, str | None] = {}
     for char in dict.fromkeys(characters):
@@ -151,6 +154,18 @@ def make_vocabulary(characters: str) -> dict[str, str | None]:
         vocabulary[label] = char
     if not vocabulary:
         raise ValueError("The character set cannot be empty.")
+    if tokens is not None:
+        if not isinstance(tokens, list):
+            raise ValueError("Tokens must be a JSON array of nonempty strings.")
+        seen = set(vocabulary.values())
+        for token in tokens:
+            if not isinstance(token, str) or not token:
+                raise ValueError("Tokens must be nonempty strings.")
+            if any(not c.isprintable() and c not in ("\n", "\t") for c in token):
+                raise ValueError("Tokens may not contain terminal control characters.")
+            if token not in seen:
+                vocabulary[f"TOKEN_{len(vocabulary):04d}"] = token
+                seen.add(token)
     vocabulary[STOP] = None
     return vocabulary
 
@@ -160,17 +175,18 @@ def make_payload(
     context: Any = None, instructions: str = INSTRUCTIONS,
     order_rng: random.Random | None = None,
 ) -> dict[str, Any]:
-    items = list(vocabulary.items())
+    items = vocabulary.items()
     if order_rng is not None:
+        items = list(items)
         order_rng.shuffle(items)
     criteria: dict[str, str | None] = {}
-    for label, char in items:
-        if char is None:
+    for label, token in items:
+        if token is None:
             criteria[label] = "Append nothing; the existing answer is complete."
-        elif char in string.ascii_letters + string.digits:
+        elif len(token) == 1 and label == token:
             criteria[label] = None  # The label itself specifies the character.
         else:
-            criteria[label] = f"Append exactly the character {json.dumps(char, ensure_ascii=False)}."
+            criteria[label] = f"Append exactly the text {json.dumps(token, ensure_ascii=False)}."
     state: dict[str, Any] = {"user_prompt": prompt, "answer_prefix": prefix}
     if context is not None:
         state["context"] = context
@@ -189,11 +205,11 @@ def read_choice(
         answer = body["answers"][QUESTION_ID]
         selected, probabilities = answer["choice"], answer["probabilities"]
     except (KeyError, TypeError):
-        raise APIError("Response is missing the next_character Choice answer.") from None
+        raise APIError("Response is missing the next_token Choice answer.") from None
     if answer.get("type") != "choice" or not isinstance(selected, str) or selected not in vocabulary:
         raise APIError("Response contains an invalid Choice type or selected label.")
     if not isinstance(probabilities, dict) or set(probabilities) != set(vocabulary):
-        raise APIError("Returned probability labels do not match the requested character set.")
+        raise APIError("Returned probability labels do not match the requested vocabulary.")
     checked: dict[str, float] = {}
     for label in vocabulary:
         value = probabilities[label]
@@ -265,13 +281,13 @@ def generate(
     """Generate into a fresh directory. Does not print or log authentication headers."""
     run_dir.mkdir(parents=True, exist_ok=False)
     write_json(run_dir / "config.json", {
-        "decoder_version": VERSION, "python_version": sys.version,
+        "decoder_version": VERSION, "trace_version": 2, "python_version": sys.version,
         "prompt": prompt, "initial_prefix": prefix, "context": context,
         "instructions": instructions, "vocabulary": vocabulary, **config,
     })
     answer_path = run_dir / "answer.txt"
     checkpoint_text(answer_path, prefix)
-    text, calls, successes = prefix, 0, 0
+    text, calls, successes, new_tokens = prefix, 0, 0, 0
     token_totals = {"input_tokens": 0, "output_tokens": 0}
     missing_usage = {"input_tokens": 0, "output_tokens": 0}
     models: set[str] = set()
@@ -314,10 +330,15 @@ def generate(
                 selected, policy = choose_label(
                     probabilities, api_choice, config["temperature"], config["top_k"], config["top_p"], rng,
                 )
-                char = vocabulary[selected]
-                next_text = text if char is None else text + char
+                token = vocabulary[selected]
+                over_limit = token is not None and (
+                    len(text) - len(prefix) + len(token) > config["max_new_chars"]
+                )
+                emitted = "" if over_limit else token
+                next_text = text if emitted is None else text + emitted
                 log("decision", call=calls, prefix_before=text, prefix_after=next_text,
-                    api_choice=api_choice, selected_label=selected, emitted_character=char,
+                    api_choice=api_choice, selected_label=selected,
+                    selected_text=token, emitted_text=emitted,
                     raw_probabilities=probabilities, raw_probability_sum=math.fsum(probabilities.values()),
                     decoding_probabilities=policy)
                 if config["verbose"]:
@@ -325,12 +346,16 @@ def generate(
                     details = ", ".join(f"{k}={probabilities[k]:.3f}" for k in top)
                     stderr.write(f"\n[{calls}] selected={selected!r}; API={api_choice!r}; {details}\n")
                     stderr.flush()
-                if char is None:
+                if over_limit:
+                    reason = "max_new_chars"
+                    break
+                if token is None:
                     reason = "stop"
                     break
                 text = next_text
+                new_tokens += 1
                 checkpoint_text(answer_path, text)
-                stdout.write(char)
+                stdout.write(token)
                 stdout.flush()
             else:
                 reason = "max_calls"
@@ -343,6 +368,7 @@ def generate(
             "stop_reason": reason, "error": error,
             "api_calls_started": calls, "successful_responses": successes,
             "new_characters": len(text) - len(prefix), "total_characters": len(text),
+            "new_tokens": new_tokens,
             "elapsed_seconds": round(time.perf_counter() - started, 3),
             "reported_token_totals": token_totals, "responses_missing_usage": missing_usage,
             "model_versions_seen": sorted(models),
@@ -364,6 +390,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--instructions-file", type=Path, help="Override the next-character question instructions.")
     p.add_argument("--alphabet", choices=ALPHABETS, default="lower", help="lower: a-z, space, period; ascii: printable ASCII + newline.")
     p.add_argument("--characters-json", type=Path, help="Custom JSON string or list of single characters; overrides --alphabet.")
+    p.add_argument("--tokens-json", type=Path, help="JSON array of text fragments to add to the character vocabulary.")
     p.add_argument("--model", default=os.environ.get("TYPESAFE_DEFAULT_MODEL", "").strip() or DEFAULT_MODEL)
     p.add_argument("--base-url", default=os.environ.get("TYPESAFE_BASE_URL", "").strip() or DEFAULT_BASE_URL)
     p.add_argument("--timeout", type=float, default=30.0, help="Timeout in seconds for network operations.")
@@ -405,7 +432,7 @@ def main(argv: list[str] | None = None) -> int:
         context = None if args.context_json is None else json.loads(args.context_json.read_text(encoding="utf-8"))
         instructions = INSTRUCTIONS if args.instructions_file is None else args.instructions_file.read_text(encoding="utf-8")
         if not instructions.strip():
-            p.error("The next-character instructions cannot be empty.")
+            p.error("The next-token instructions cannot be empty.")
         characters = ALPHABETS[args.alphabet]
         if args.characters_json is not None:
             custom = json.loads(args.characters_json.read_text(encoding="utf-8"))
@@ -415,7 +442,10 @@ def main(argv: list[str] | None = None) -> int:
                 characters = custom
             else:
                 p.error("--characters-json must contain a string or a list of single-character strings.")
-        vocabulary = make_vocabulary(characters)
+        tokens = None if args.tokens_json is None else json.loads(args.tokens_json.read_text(encoding="utf-8"))
+        if args.tokens_json is not None and not isinstance(tokens, list):
+            p.error("--tokens-json must contain a JSON array of nonempty strings.")
+        vocabulary = make_vocabulary(characters, tokens)
         seed = args.seed if args.seed is not None else secrets.randbits(64)
         if args.dry_run:
             order_rng = random.Random(f"{seed}:options") if args.shuffle_options else None
@@ -440,7 +470,8 @@ def main(argv: list[str] | None = None) -> int:
         summary = generate(client, prompt=prompt, prefix=prefix, vocabulary=vocabulary,
                            config=config, run_dir=run_dir, stdout=sys.stdout, stderr=sys.stderr,
                            context=context, instructions=instructions)
-        print(f"\n[{summary['stop_reason']}] {summary['new_characters']} new characters; "
+        print(f"\n[{summary['stop_reason']}] {summary['new_characters']} new characters "
+              f"in {summary['new_tokens']} tokens; "
               f"{summary['api_calls_started']} attempted calls; "
               f"{summary['elapsed_seconds']}s.\n[saved] {run_dir / 'answer.txt'}", file=sys.stderr)
         if summary["error"]:

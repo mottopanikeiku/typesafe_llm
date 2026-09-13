@@ -13,7 +13,6 @@ from unittest.mock import patch
 from urllib.error import HTTPError, URLError
 
 import typesafe_llm as m
-import inspect_trace
 
 
 class FakeEvaluator:
@@ -45,6 +44,24 @@ class FakeEvaluator:
         if not self.missing_usage:
             body["usage"] = {"input_tokens": 100, "output_tokens": 10}
         return m.APIResult(body, f"fake-request-{len(self.payloads)}", 1.0)
+
+
+class TokenEvaluator:
+    """Scripted text fragments, not live Jev quality evidence."""
+
+    def __init__(self, vocabulary, pieces):
+        self.vocabulary = vocabulary
+        self.pieces = iter(pieces)
+        self.prefixes = []
+
+    def evaluate(self, payload):
+        self.prefixes.append(payload["state"]["answer_prefix"])
+        piece = next(self.pieces)
+        label = next(key for key, value in self.vocabulary.items() if value == piece)
+        return m.APIResult({"model": "offline-token-fixture", "answers": {
+            m.QUESTION_ID: {"type": "choice", "choice": label,
+                            "probabilities": {key: float(key == label) for key in self.vocabulary}},
+        }})
 
 
 class DecoderTests(unittest.TestCase):
@@ -90,6 +107,38 @@ class DecoderTests(unittest.TestCase):
     def test_unsafe_control_characters_rejected(self):
         with self.assertRaises(ValueError):
             m.make_vocabulary("a\x1b")
+
+    def test_duplicate_fragments_do_not_get_extra_probability_slots(self):
+        vocabulary = m.make_vocabulary("ab", ["ab", "ab", "a", "STOP"])
+        self.assertEqual(list(vocabulary.values()), ["a", "b", "ab", "STOP", None])
+
+    def test_invalid_fragments_rejected_before_generation(self):
+        for tokens in ["word", [""], [None], ["a\x1b[31m"], ["\ud800"]]:
+            with self.subTest(tokens=repr(tokens)), self.assertRaises(ValueError):
+                m.make_vocabulary("ab", tokens)
+
+    def test_fragments_condition_each_subsequent_step(self):
+        self.vocab = m.make_vocabulary("abc ", ["ab", " c"])
+        fake = TokenEvaluator(self.vocab, ["ab", " c", None])
+        summary = self.run_fake(fake)
+        self.assertEqual(self.stdout.getvalue(), "ab c")
+        self.assertEqual(fake.prefixes, ["", "ab", "ab c"])
+        self.assertEqual(summary["new_tokens"], 2)
+        self.assertEqual(summary["new_characters"], 4)
+        self.assertEqual(summary["api_calls_started"], 3)
+        self.assertEqual(summary["stop_reason"], "stop")
+
+    def test_character_limit_never_splits_or_resamples_a_fragment(self):
+        self.vocab = m.make_vocabulary("abc ", ["ab", " c"])
+        summary = self.run_fake(TokenEvaluator(self.vocab, ["ab", " c"]), max_new_chars=3)
+        self.assertEqual((self.path / "answer.txt").read_text(), "ab")
+        self.assertEqual(summary["new_tokens"], 1)
+        self.assertEqual(summary["stop_reason"], "max_new_chars")
+        events = [json.loads(line) for line in (self.path / "trace.jsonl").read_text().splitlines()]
+        last = [event for event in events if event["event"] == "decision"][-1]
+        self.assertEqual(last["selected_text"], " c")
+        self.assertEqual(last["emitted_text"], "")
+        self.assertEqual(last["prefix_after"], "ab")
 
     def test_payload_schema(self):
         payload = m.make_payload("question", "co", self.vocab, "test", {"blue": 4})
@@ -245,7 +294,7 @@ class DecoderTests(unittest.TestCase):
             self.run_fake()
 
     def test_dry_run_needs_no_key_or_network(self):
-        with patch.dict("os.environ", {}, clear=True), patch("sys.stdout", new_callable=io.StringIO) as out:
+        with patch.dict("os.environ", {}, clear=True), patch("sys.stdout", new_callable=io.StringIO):
             with patch.object(m.TypeSafeHTTP, "evaluate", side_effect=AssertionError("Unexpected network")):
                 self.assertEqual(m.main(["test", "--dry-run"]), 0)
 

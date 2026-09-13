@@ -54,9 +54,11 @@ class TokenEvaluator:
         self.vocabulary = vocabulary
         self.pieces = iter(pieces)
         self.prefixes = []
+        self.criteria = []
 
     def evaluate(self, payload):
         self.prefixes.append(payload["state"]["answer_prefix"])
+        self.criteria.append(copy.deepcopy(payload["questions"][m.QUESTION_ID]["criteria"]))
         piece = next(self.pieces)
         label = next(key for key, value in self.vocabulary.items() if value == piece)
         return m.APIResult({"model": "offline-token-fixture", "answers": {
@@ -135,6 +137,7 @@ class DecoderTests(unittest.TestCase):
         self.assertEqual(summary["new_characters"], 4)
         self.assertEqual(summary["api_calls_started"], 3)
         self.assertEqual(summary["stop_reason"], "stop")
+        self.assertTrue(all(options == fake.criteria[0] for options in fake.criteria))
 
     def test_character_limit_never_splits_or_resamples_a_fragment(self):
         self.vocab = m.make_vocabulary("abc ", ["ab", " c"])
@@ -154,6 +157,23 @@ class DecoderTests(unittest.TestCase):
         a, b = [v["questions"][m.QUESTION_ID]["criteria"] for v in (ordered, shuffled)]
         self.assertEqual(a, b)
         self.assertNotEqual(list(a), list(b))
+
+    def test_offered_options_are_independent_of_prompt_prefix_and_context(self):
+        first = m.make_payload("First task", "", self.vocab, "m", context={"task": 1})
+        second = m.make_payload("Different task", 'ab "\n', self.vocab, "m", context={"task": 2})
+        self.assertEqual(first["questions"], second["questions"])
+        self.assertNotEqual(first["state"], second["state"])
+
+    def test_generation_keeps_every_option_and_description_at_word_boundaries(self):
+        fake = FakeEvaluator(target="ab ab")
+        summary = self.run_fake(fake, shuffle_options=True)
+        self.assertEqual(self.stdout.getvalue(), "ab ab")
+        self.assertEqual(summary["stop_reason"], "stop")
+        options = [list(payload["questions"][m.QUESTION_ID]["criteria"].items()) for payload in fake.payloads]
+        self.assertEqual([payload["state"]["answer_prefix"] for payload in fake.payloads],
+                         ["", "a", "ab", "ab ", "ab a", "ab ab"])
+        for offered in options:
+            self.assertEqual(offered, options[0])
 
     def test_greedy(self):
         chosen, policy = m.choose_label({"a": .7, "b": .3}, "b", 0, 0, 1, random.Random(1))

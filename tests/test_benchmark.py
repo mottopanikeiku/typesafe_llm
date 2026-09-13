@@ -46,13 +46,13 @@ class BenchmarkTests(unittest.TestCase):
         self.next_run += 1
         suite_path = self.root / f"suite-{self.next_run}.json"
         suite_path.write_text(json.dumps({"cases": cases}), encoding="utf-8")
-        args = benchmark.parser().parse_args([str(suite_path), "--decoder", "character", *options])
+        args = benchmark.parser().parse_args([str(suite_path), *options])
         instructions = benchmark.validate_options(args)
         validated = benchmark.load_suite(suite_path)
         plan = benchmark.make_plan(validated, args, instructions)
         path = self.root / f"campaign-{self.next_run}"
         result = benchmark.run_campaign(evaluator, cases=validated, plan=plan,
-                                        campaign_dir=path, stderr=io.StringIO(), lexicon=args.word_lexicon)
+                                        campaign_dir=path, stderr=io.StringIO())
         return result, path
 
     @staticmethod
@@ -60,6 +60,28 @@ class BenchmarkTests(unittest.TestCase):
         return [{"id": f"fixture-{index}", "prompt": "Offline fixture task.",
                  "prefix": prefix, "expected": ["a"] if expected is None else expected}
                 for index in range(count)]
+
+    def test_every_case_and_prefix_receives_the_same_options(self):
+        cases = [
+            {"id": "first", "prompt": "First task", "prefix": "x", "context": {"task": 1}, "expected": ["xa"]},
+            {"id": "second", "prompt": "Second task", "prefix": "y", "context": {"task": 2}, "expected": ["ya"]},
+        ]
+        evaluator = ScriptedEvaluator(["a", decoder.STOP, "a", decoder.STOP])
+        results, _ = self.campaign(evaluator, cases)
+        self.assertEqual(results["aggregate"]["completed_exact_matches"], 2)
+        self.assertEqual([payload["state"]["answer_prefix"] for payload in evaluator.payloads],
+                         ["x", "xa", "y", "ya"])
+        for payload in evaluator.payloads:
+            self.assertEqual(payload["questions"], evaluator.payloads[0]["questions"])
+
+    def test_per_case_vocabulary_overrides_are_rejected(self):
+        suite_path = self.root / "mixed-vocabularies.json"
+        cases = self.cases(2)
+        cases[0]["characters"] = "a"
+        cases[1]["characters"] = "b"
+        suite_path.write_text(json.dumps({"characters": "ab", "cases": cases}), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            benchmark.load_suite(suite_path)
 
     def test_shared_cap_includes_partial_sample_across_repeats(self):
         evaluator = ScriptedEvaluator(["a", decoder.STOP, "a", "a"])

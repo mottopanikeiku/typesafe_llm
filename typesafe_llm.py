@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Experimental autoregressive decoder for TypeSafe Jev. Python 3.10+, no dependencies.
 
-Word-guided decoding ranks lexical proposals, then chooses a text token or STOP.
+Every request offers the same fixed vocabulary of text tokens and STOP.
 All text still comes from TypeSafe choices, NOT native next-token probabilities.
 
     export TYPESAFE_API_KEY='...'
@@ -29,9 +29,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-from lexicon import DEFAULT_LEXICON, WordLexicon
-
-VERSION = "3.0.0"
+VERSION = "4.0.0"
 DEFAULT_BASE_URL = "https://api.typesafe.ai"
 DEFAULT_MODEL = "jev-latest"
 QUESTION_ID = "next_token"
@@ -43,20 +41,12 @@ ALPHABETS = {
     "ascii": "".join(chr(i) for i in range(32, 127)) + "\n",
 }
 INSTRUCTIONS = (
-    "Choose the candidate text that is a prefix of the correct, concise answer to user_prompt. "
-    "Use context as task data when present. Each candidate extends answer_prefix by exactly "
-    "one token; candidates can end inside a word and need not be complete answers. "
-    "Prefer the continuation that can lead to the correct answer, not an unrelated word. "
+    "Choose the exact next token to append to answer_prefix to answer user_prompt. "
+    "Use context as task data when present. Select from the same fixed vocabulary on every step. "
+    "A token can end inside a word and need not be a complete answer. "
+    "Continue the actual answer_prefix without replacing, skipping, or correcting earlier text. "
     "Choose STOP only if answer_prefix is already a complete correct answer."
 )
-LEXICAL_INSTRUCTIONS = (
-    "Choose the continuation of a correct, concise answer to user_prompt, using context when present. "
-    "Each option extends answer_prefix with exact text. Prefer a correctly spelled whole word "
-    "when it is available, rather than a shorter fragment of that same word. "
-    "Do not approximate spelling or skip letters. "
-    "Choose STOP only when answer_prefix is already a complete answer."
-)
-
 
 class APIError(RuntimeError):
     """An HTTP, connection, or protocol error; never silently retried."""
@@ -195,9 +185,9 @@ def make_payload(
     criteria: dict[str, str | None] = {}
     for label, token in items:
         if token is None:
-            criteria[label] = "The complete answer is " + json.dumps(prefix, ensure_ascii=False)
+            criteria[label] = "End the answer without appending text."
         else:
-            criteria[label] = "The answer begins with " + json.dumps(prefix + token, ensure_ascii=False)
+            criteria[label] = "Append exactly " + json.dumps(token, ensure_ascii=False)
     state: dict[str, Any] = {"user_prompt": prompt, "answer_prefix": prefix}
     if context is not None:
         state["context"] = context
@@ -209,44 +199,14 @@ def make_payload(
     }
 
 
-def plan_lexical_step(
-    prompt: str, prefix: str, vocabulary: dict[str, str | None], model: str,
-    lexicon: WordLexicon, context: Any = None, order_rng: random.Random | None = None,
-) -> tuple[dict[str, Any] | None, dict[str, dict[str, str]], dict[str, str | None]]:
-    """Plan independent word groups over the same actual state, not future prefixes."""
-    shortlist = dict(vocabulary)
-    groups: dict[str, dict[str, str]] = {}
-    capacity = MAX_CHOICES - len(shortlist)
-    if capacity <= 0:
-        return None, groups, shortlist
-    for name, group in lexicon.groups(prefix, vocabulary).items():
-        if capacity <= 0:
-            break
-        if len(group) == 1:
-            shortlist.update(group)
-            capacity -= 1
-        else:
-            groups[name] = group
-            capacity -= min(2, capacity)
-    if not groups:
-        return None, groups, shortlist
-    payload = make_payload(prompt, prefix, {}, model, context)
-    payload["questions"] = {
-        name: make_payload(prompt, prefix, group, model, context, INSTRUCTIONS, order_rng)["questions"][QUESTION_ID]
-        for name, group in groups.items()
-    }
-    return payload, groups, shortlist
-
-
 def read_choice(
     body: dict[str, Any], vocabulary: dict[str, str | None],
-    question_id: str = QUESTION_ID,
 ) -> tuple[str, dict[str, float]]:
     try:
-        answer = body["answers"][question_id]
+        answer = body["answers"][QUESTION_ID]
         selected, probabilities = answer["choice"], answer["probabilities"]
     except (KeyError, TypeError):
-        raise APIError(f"Response is missing the {question_id} Choice answer.") from None
+        raise APIError(f"Response is missing the {QUESTION_ID} Choice answer.") from None
     if answer.get("type") != "choice" or not isinstance(selected, str) or selected not in vocabulary:
         raise APIError("Response contains an invalid Choice type or selected label.")
     if not isinstance(probabilities, dict) or set(probabilities) != set(vocabulary):
@@ -317,18 +277,14 @@ def checkpoint_text(path: Path, text: str) -> None:
 def generate(
     client: Evaluator, *, prompt: str, prefix: str, vocabulary: dict[str, str | None],
     config: dict[str, Any], run_dir: Path, stdout: TextIO, stderr: TextIO,
-    context: Any = None, instructions: str | None = None, lexicon: WordLexicon | None = None,
+    context: Any = None, instructions: str = INSTRUCTIONS,
 ) -> dict[str, Any]:
     """Generate into a fresh directory. Does not print or log authentication headers."""
-    if instructions is None:
-        instructions = LEXICAL_INSTRUCTIONS if lexicon is not None else INSTRUCTIONS
     run_dir.mkdir(parents=True, exist_ok=False)
     write_json(run_dir / "config.json", {
-        "decoder_version": VERSION, "trace_version": 3, "python_version": sys.version,
+        "decoder_version": VERSION, "trace_version": 4, "python_version": sys.version,
         "prompt": prompt, "initial_prefix": prefix, "context": context,
         "instructions": instructions, "vocabulary": vocabulary, **config,
-        "decoder": "lexical" if lexicon is not None else "character",
-        "lexicon": None if lexicon is None else {"source": lexicon.source, "sha256": lexicon.sha256},
     })
     answer_path = run_dir / "answer.txt"
     checkpoint_text(answer_path, prefix)
@@ -347,14 +303,14 @@ def generate(
             }, ensure_ascii=False, allow_nan=False) + "\n")
             trace.flush()
 
-        def evaluate(payload: dict[str, Any], stage: str) -> APIResult:
+        def evaluate(payload: dict[str, Any]) -> APIResult:
             nonlocal calls, successes
             # Count before dispatch: failures and interruptions consume an attempt too.
             calls += 1
-            log("request", call=calls, stage=stage, payload=payload)
+            log("request", call=calls, payload=payload)
             result = client.evaluate(payload)
             successes += 1
-            log("response", call=calls, stage=stage, request_id=result.request_id,
+            log("response", call=calls, request_id=result.request_id,
                 elapsed_ms=result.elapsed_ms, body=result.body)
             model = result.body.get("model")
             if isinstance(model, str):
@@ -371,34 +327,19 @@ def generate(
         try:
             stdout.write(prefix)
             stdout.flush()
+            template = make_payload(prompt, prefix, vocabulary, config["model"], context, instructions, order_rng)
             while calls < config["max_calls"]:
                 if len(text) - len(prefix) >= config["max_new_chars"]:
                     reason = "max_new_chars"
                     break
-                step_vocabulary = vocabulary
-                if lexicon is not None:
-                    proposals, groups, step_vocabulary = plan_lexical_step(
-                        prompt, text, vocabulary, config["model"], lexicon, context, order_rng,
-                    )
-                    if proposals is not None:
-                        # Never spend the last attempt on proposals we cannot then select.
-                        if config["max_calls"] - calls < 2:
-                            reason = "max_calls"
-                            break
-                        ranked_words = evaluate(proposals, "proposals")
-                        for name, group in groups.items():
-                            preferred, scores = read_choice(ranked_words.body, group, name)
-                            ranked = sorted(scores, key=lambda label: (scores[label], label == preferred), reverse=True)
-                            for label in ranked[:2]:
-                                if len(step_vocabulary) < MAX_CHOICES:
-                                    step_vocabulary[label] = group[label]
-                payload = make_payload(prompt, text, step_vocabulary, config["model"], context, instructions, order_rng)
-                result = evaluate(payload, "selection")
-                api_choice, probabilities = read_choice(result.body, step_vocabulary)
+                # Reuse the exact question and options; only the prefix advances.
+                payload = {**template, "state": {**template["state"], "answer_prefix": text}}
+                result = evaluate(payload)
+                api_choice, probabilities = read_choice(result.body, vocabulary)
                 selected, policy = choose_label(
                     probabilities, api_choice, config["temperature"], config["top_k"], config["top_p"], rng,
                 )
-                token = step_vocabulary[selected]
+                token = vocabulary[selected]
                 over_limit = token is not None and (
                     len(text) - len(prefix) + len(token) > config["max_new_chars"]
                 )
@@ -407,13 +348,13 @@ def generate(
                 log("decision", call=calls, prefix_before=text, prefix_after=next_text,
                     api_choice=api_choice, selected_label=selected,
                     selected_text=token, emitted_text=emitted,
-                    vocabulary=step_vocabulary,
+                    vocabulary=vocabulary,
                     raw_probabilities=probabilities, raw_probability_sum=math.fsum(probabilities.values()),
                     decoding_probabilities=policy)
                 if config["verbose"]:
                     top = sorted(probabilities, key=probabilities.get, reverse=True)[:5]
-                    details = ", ".join(f"{step_vocabulary[k]!r}={probabilities[k]:.3f}" for k in top)
-                    stderr.write(f"\n[{calls}] selected={token!r}; API={step_vocabulary[api_choice]!r}; {details}\n")
+                    details = ", ".join(f"{vocabulary[k]!r}={probabilities[k]:.3f}" for k in top)
+                    stderr.write(f"\n[{calls}] selected={token!r}; API={vocabulary[api_choice]!r}; {details}\n")
                     stderr.flush()
                 if over_limit:
                     reason = "max_new_chars"
@@ -456,12 +397,10 @@ def parser() -> argparse.ArgumentParser:
     group.add_argument("--prefix", default="", help="Answer text already written.")
     group.add_argument("--prefix-file", type=Path, help="Continue an answer.txt from a previous run.")
     p.add_argument("--context-json", type=Path, help="Extra task data, e.g. the original payoff state.")
-    p.add_argument("--instructions-file", type=Path, help="Override the final continuation-selection instructions.")
+    p.add_argument("--instructions-file", type=Path, help="Override the fixed next-token selection instructions.")
     p.add_argument("--alphabet", choices=ALPHABETS, default="lower", help="lower: a-z, space, period; ascii: printable ASCII + newline.")
     p.add_argument("--characters-json", type=Path, help="Custom JSON string or list of single characters; overrides --alphabet.")
     p.add_argument("--tokens-json", type=Path, help="JSON array of text fragments to add to the character vocabulary.")
-    p.add_argument("--decoder", choices=("lexical", "character"), default="lexical", help="lexical: rank word continuations before selection; character: direct selection only.")
-    p.add_argument("--lexicon", type=Path, default=DEFAULT_LEXICON, help="Frequency-ordered JSON word list for lexical decoding.")
     p.add_argument("--model", default=os.environ.get("TYPESAFE_DEFAULT_MODEL", "").strip() or DEFAULT_MODEL)
     p.add_argument("--base-url", default=os.environ.get("TYPESAFE_BASE_URL", "").strip() or DEFAULT_BASE_URL)
     p.add_argument("--timeout", type=float, default=30.0, help="Timeout in seconds for network operations.")
@@ -471,7 +410,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--top-k", type=int, default=0, help="Sampling: keep this many options; 0 keeps all.")
     p.add_argument("--top-p", type=float, default=1.0, help="Sampling: nucleus probability cutoff after temperature/top-k.")
     p.add_argument("--seed", type=int, help="Local sampling seed; logged. Does not seed the server.")
-    p.add_argument("--shuffle-options", action="store_true", help="Shuffle criteria order on every call; logged.")
+    p.add_argument("--shuffle-options", action="store_true", help="Shuffle criteria once per run, then keep that order; logged.")
     p.add_argument("--out-dir", type=Path, default=Path("runs"), help="Parent directory for a unique run folder.")
     p.add_argument("--verbose", "-v", action="store_true", help="Show top raw probabilities on stderr.")
     p.add_argument("--dry-run", action="store_true", help="Print the first request body without a key or a network call.")
@@ -501,8 +440,7 @@ def main(argv: list[str] | None = None) -> int:
             p.error("The prompt cannot be empty.")
         prefix = args.prefix if args.prefix_file is None else args.prefix_file.read_text(encoding="utf-8")
         context = None if args.context_json is None else json.loads(args.context_json.read_text(encoding="utf-8"))
-        lexicon = WordLexicon.load(args.lexicon) if args.decoder == "lexical" else None
-        instructions = LEXICAL_INSTRUCTIONS if lexicon is not None else INSTRUCTIONS
+        instructions = INSTRUCTIONS
         if args.instructions_file is not None:
             instructions = args.instructions_file.read_text(encoding="utf-8")
         if not instructions.strip():
@@ -523,16 +461,7 @@ def main(argv: list[str] | None = None) -> int:
         seed = args.seed if args.seed is not None else secrets.randbits(64)
         if args.dry_run:
             order_rng = random.Random(f"{seed}:options") if args.shuffle_options else None
-            payload = None
-            step_vocabulary = vocabulary
-            if lexicon is not None:
-                payload, _, step_vocabulary = plan_lexical_step(
-                    prompt, prefix, vocabulary, args.model, lexicon, context, order_rng,
-                )
-                if payload is not None and args.max_calls < 2:
-                    p.error("This lexical step needs at least two attempts; increase --max-calls or use --decoder character.")
-            if payload is None:
-                payload = make_payload(prompt, prefix, step_vocabulary, args.model, context, instructions, order_rng)
+            payload = make_payload(prompt, prefix, vocabulary, args.model, context, instructions, order_rng)
             print(json.dumps(payload, indent=2, ensure_ascii=False))
             return 0
         key = os.environ.get("TYPESAFE_API_KEY", "").strip()
@@ -552,7 +481,7 @@ def main(argv: list[str] | None = None) -> int:
             print("[note] top-k/top-p have no effect in greedy mode (temperature=0).", file=sys.stderr)
         summary = generate(client, prompt=prompt, prefix=prefix, vocabulary=vocabulary,
                            config=config, run_dir=run_dir, stdout=sys.stdout, stderr=sys.stderr,
-                           context=context, instructions=instructions, lexicon=lexicon)
+                           context=context, instructions=instructions)
         print(f"\n[{summary['stop_reason']}] {summary['new_characters']} new characters "
               f"in {summary['new_tokens']} tokens; "
               f"{summary['api_calls_started']} attempted calls; "

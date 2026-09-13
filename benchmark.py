@@ -3,7 +3,7 @@
 
 Suite JSON: {"characters": "optional shared alphabet", "cases": [{"id": "unique",
 "prompt": "task", "expected": ["accepted full answer"], "prefix": "optional",
-"context": <optional JSON>, "characters": "optional alphabet", "max_new_chars": 40}]}.
+"context": <optional JSON>, "max_new_chars": 40}]}.
 Expected answers are scoring data only, never decoder configuration or requests.
 Artifacts: manifest.json contains the request plan (no expected answers);
 results.json contains aggregate metrics and every scheduled sample, including
@@ -27,7 +27,7 @@ from typing import Any, TextIO
 import typesafe_llm as decoder
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 USAGE_KEYS = ("input_tokens", "output_tokens")
 
 
@@ -70,7 +70,7 @@ def load_suite(path: Path) -> list[dict[str, Any]]:
     decoder.make_vocabulary(shared_characters)
     seen: set[str] = set()
     validated = []
-    allowed = {"id", "prompt", "expected", "prefix", "context", "characters", "max_new_chars"}
+    allowed = {"id", "prompt", "expected", "prefix", "context", "max_new_chars"}
     for index, case in enumerate(cases):
         if not isinstance(case, dict) or set(case) - allowed:
             raise ValueError(f"Case {index + 1} must be an object with supported case fields only.")
@@ -84,13 +84,11 @@ def load_suite(path: Path) -> list[dict[str, Any]]:
         if not isinstance(expected, list) or not expected or not all(isinstance(s, str) for s in expected):
             raise ValueError(f"Case {case_id!r} expected must be a nonempty list of strings.")
         prefix = case.get("prefix", "")
-        characters = case.get("characters", shared_characters)
-        if not isinstance(prefix, str) or not isinstance(characters, str):
-            raise ValueError(f"Case {case_id!r} prefix and characters must be strings.")
-        decoder.make_vocabulary(characters)
+        if not isinstance(prefix, str):
+            raise ValueError(f"Case {case_id!r} prefix must be a string.")
         if "max_new_chars" in case and (type(case["max_new_chars"]) is not int or case["max_new_chars"] < 1):
             raise ValueError(f"Case {case_id!r} max_new_chars must be a positive integer.")
-        validated.append({**case, "prefix": prefix, "characters": characters})
+        validated.append({**case, "prefix": prefix, "characters": shared_characters})
     return validated
 
 
@@ -159,8 +157,6 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--shuffle-options", action="store_true")
     p.add_argument("--instructions-file", type=Path)
     p.add_argument("--tokens-json", type=Path, help="Fixed JSON list of text fragments shared by all cases; never derive from targets.")
-    p.add_argument("--decoder", choices=("lexical", "character"), default="lexical")
-    p.add_argument("--lexicon", type=Path, default=decoder.DEFAULT_LEXICON)
     p.add_argument("--out-dir", type=Path, default=Path("runs"))
     p.add_argument("--dry-run", action="store_true")
     return p
@@ -179,8 +175,7 @@ def validate_options(args: argparse.Namespace) -> str:
     decoder.TypeSafeHTTP("offline-validation", args.base_url, args.timeout)
     if args.out_dir.exists() and not args.out_dir.is_dir():
         raise ValueError("Output directory is not a directory.")
-    args.word_lexicon = decoder.WordLexicon.load(args.lexicon) if args.decoder == "lexical" else None
-    instructions = decoder.LEXICAL_INSTRUCTIONS if args.word_lexicon is not None else decoder.INSTRUCTIONS
+    instructions = decoder.INSTRUCTIONS
     if args.instructions_file is not None:
         instructions = args.instructions_file.read_text(encoding="utf-8")
     if not instructions.strip():
@@ -199,15 +194,17 @@ def validate_options(args: argparse.Namespace) -> str:
 
 def make_plan(cases: list[dict[str, Any]], args: argparse.Namespace, instructions: str) -> dict[str, Any]:
     samples = []
-    for case in cases:
-        decoder.make_vocabulary(case["characters"], args.tokens)
+    characters = cases[0]["characters"]
+    if any(case["characters"] != characters for case in cases):
+        raise ValueError("All cases must use the same suite-level character vocabulary.")
+    decoder.make_vocabulary(characters, args.tokens)
     for repeat in range(args.repeats):
         for case in cases:
             index = len(samples)
             samples.append({
                 "index": index, "case_id": case["id"], "repeat": repeat + 1,
                 "seed": args.seed + index, "prompt": case["prompt"], "prefix": case["prefix"],
-                "context": case.get("context"), "characters": case["characters"],
+                "context": case.get("context"),
                 "max_calls": args.max_calls, "max_new_chars": case.get("max_new_chars", args.max_new_chars),
                 "run_path": f"samples/{index + 1:06d}",
             })
@@ -217,11 +214,7 @@ def make_plan(cases: list[dict[str, Any]], args: argparse.Namespace, instruction
         "base_url": args.base_url, "timeout": args.timeout,
         "temperature": args.temperature, "top_k": args.top_k, "top_p": args.top_p,
         "shuffle_options": args.shuffle_options, "instructions": instructions,
-        "tokens": args.tokens,
-        "decoder": args.decoder,
-        "lexicon": None if args.word_lexicon is None else {
-            "source": args.word_lexicon.source, "sha256": args.word_lexicon.sha256,
-        },
+        "characters": characters, "tokens": args.tokens,
         "seed_schedule": "seed + zero-based sample index; repeat-major, suite order; local only",
         "max_total_calls": args.max_total_calls,
         "hard_max_attempts": min(args.max_total_calls, len(samples) * args.max_calls),
@@ -256,12 +249,9 @@ def aggregate(records: list[dict[str, Any]], budget: SharedBudget, elapsed: floa
 
 
 def run_campaign(client: decoder.Evaluator, *, cases: list[dict[str, Any]],
-                 plan: dict[str, Any], campaign_dir: Path, stderr: TextIO = sys.stderr,
-                 lexicon: decoder.WordLexicon | None = None) -> dict[str, Any]:
+                 plan: dict[str, Any], campaign_dir: Path, stderr: TextIO = sys.stderr) -> dict[str, Any]:
     """Run an already validated plan in a new directory. No request uses expected."""
-    actual_lexicon = None if lexicon is None else {"source": lexicon.source, "sha256": lexicon.sha256}
-    if actual_lexicon != plan["lexicon"]:
-        raise ValueError("The supplied lexicon does not match the validated campaign plan.")
+    vocabulary = decoder.make_vocabulary(plan["characters"], plan["tokens"])
     campaign_dir.mkdir(parents=True, exist_ok=False)
     budget = SharedBudget(client, plan["max_total_calls"])
     expected_by_id = {case["id"]: case["expected"] for case in cases}
@@ -307,9 +297,9 @@ def run_campaign(client: decoder.Evaluator, *, cases: list[dict[str, Any]],
             try:
                 summary = decoder.generate(
                     budget, prompt=sample["prompt"], prefix=sample["prefix"],
-                    context=sample["context"], vocabulary=decoder.make_vocabulary(sample["characters"], plan["tokens"]),
+                    context=sample["context"], vocabulary=vocabulary,
                     instructions=plan["instructions"], config=config, run_dir=run_dir,
-                    stdout=output, stderr=stderr, lexicon=lexicon,
+                    stdout=output, stderr=stderr,
                 )
             except KeyboardInterrupt:
                 summary = {"stop_reason": "interrupted", "error": None}
@@ -365,8 +355,7 @@ def main(argv: list[str] | None = None) -> int:
         parent = Path(tempfile.mkdtemp(prefix="benchmark_", dir=args.out_dir))
         campaign_dir = parent / "campaign"
         print(f"[benchmark] {campaign_dir}\n[limit] <= {plan['hard_max_attempts']} HTTP attempts; no retries.", file=sys.stderr)
-        results = run_campaign(client, cases=cases, plan=plan, campaign_dir=campaign_dir,
-                               lexicon=args.word_lexicon)
+        results = run_campaign(client, cases=cases, plan=plan, campaign_dir=campaign_dir)
         print(json.dumps({"status": results["status"], "aggregate": results["aggregate"],
                           "results_path": str(campaign_dir / "results.json")}, indent=2))
         if results["error"]:

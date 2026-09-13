@@ -19,9 +19,10 @@ versions, and returned model names record what an experiment actually used.
 The documented API provides evaluation and model listing. It does not provide
 training/fine-tuning endpoints, weights, hidden activations, a native tokenizer,
 or native vocabulary logits. This decoder constructs an autoregressive process
-outside Jev by repeatedly asking the same fixed-vocabulary question with an
-updated prefix in `state`. It neither trains Jev nor creates a separately
-trained model from Jev outputs.
+outside Jev by scoring candidate prefixes against a fixed output vocabulary.
+Descriptions show the contextual candidate text; labels still map to the same
+characters or configured fragments. It neither trains Jev nor creates a
+separately trained model from Jev outputs.
 
 ## Public API contract
 
@@ -47,7 +48,7 @@ trained model from Jev outputs.
 Choice probabilities are over the supplied options. They are not the native
 next-token probabilities of a generative LLM. Rounding can make the returned
 values sum imperfectly; traces preserve the raw values separately from local
-normalization, temperature, top-k, and top-p.
+normalization, sequence scoring, temperature, top-k, and top-p.
 
 ## Composition boundaries
 
@@ -55,11 +56,18 @@ normalization, temperature, top-k, and top-p.
 independent questions over one shared state. It does not establish that asking
 about several different candidate prefixes in that state is identical to
 separate requests with isolated states. This decoder sends one Choice question
-per request and conditions every emission on the actual selected prefix.
-The option labels and descriptions stay fixed; only `state.answer_prefix` grows.
-There are no speculative future states, dictionary proposals, or changing
-shortlists. The response is still a distribution over supplied options rather
-than a native generative model vocabulary.
+per request, with the candidate prefix isolated in that request's state.
+Beam search explores several paths across separate requests; its output
+membership and label-to-token mapping never change. Descriptions do change with
+the candidate prefix. There are no dictionary proposals or changing shortlists.
+The response remains a distribution over supplied options, not a native
+generative model vocabulary.
+
+Token-diverse pruning, length-normalized path scoring, prefix caching, and
+final-path selection are local decoder policies, not documented Jev generation
+features. Diversity preserves alternative ending actions within the beam budget;
+it does not remove options from requests or alter the recorded model scores.
+These heuristics have no general fluency, calibration, or optimality guarantee.
 
 [Noul](https://docs.typesafe.ai/primitives/noul.md) returns an independent yes
 probability. A set of Noul scores is not a mutually exclusive Choice distribution;

@@ -1,0 +1,32 @@
+{
+  "characters": "abcdefghijklmnopqrstuvwxyz .",
+  "cases": [
+    {
+      "id": "largest-planet",
+      "prompt": "Return only the lowercase name of the largest planet in our solar system.",
+      "expected": ["jupiter"]
+    },
+    {
+      "id": "copy-cobalt",
+      "prompt": "Copy the following lowercase text exactly: cobalt",
+      "expected": ["cobalt"]
+    },
+    {
+      "id": "context-larger-count",
+      "prompt": "Which item has the larger count? Reply with its lowercase name only.",
+      "context": {
+        "items": [
+          {"name": "moss", "count": 17},
+          {"name": "fern", "count": 9}
+        ]
+      },
+      "expected": ["moss"]
+    },
+    {
+      "id": "continue-young-dog",
+      "prompt": "Complete the lowercase word for a young dog. Output only that word.",
+      "prefix": "pu",
+      "expected": ["puppy", "pup"]
+    }
+  ]
+}

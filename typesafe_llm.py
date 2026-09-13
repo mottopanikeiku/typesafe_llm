@@ -34,19 +34,17 @@ DEFAULT_MODEL = "jev-latest"
 QUESTION_ID = "next_token"
 STOP = "STOP"
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+MAX_CHOICES = 255
 ALPHABETS = {
     "lower": string.ascii_lowercase + " .",
     "ascii": "".join(chr(i) for i in range(32, 127)) + "\n",
 }
 INSTRUCTIONS = (
-    "Select the next text token of a correct, concise answer to "
-    "`user_prompt`, using `context` as task data when present. "
-    "`answer_prefix` is the answer already written. Continue it literally: "
-    "it may end in the middle of a word. Do not restart, rewrite, or repeat "
-    "the prefix. A token is one character or a longer text fragment. "
-    "Select the token that should immediately follow the prefix, literally. "
-    "Use the available token choices. Choose STOP only when the existing "
-    "prefix is already a complete answer. An empty prefix is not complete."
+    "Choose the candidate text that is a prefix of the correct, concise answer to user_prompt. "
+    "Use context as task data when present. Each candidate extends answer_prefix by exactly "
+    "one token; candidates can end inside a word and need not be complete answers. "
+    "Prefer the continuation that can lead to the correct answer, not an unrelated word. "
+    "Choose STOP only if answer_prefix is already a complete correct answer."
 )
 
 
@@ -167,6 +165,8 @@ def make_vocabulary(
                 vocabulary[f"TOKEN_{len(vocabulary):04d}"] = token
                 seen.add(token)
     vocabulary[STOP] = None
+    if len(vocabulary) > MAX_CHOICES:
+        raise ValueError(f"TypeSafe Choice supports at most {MAX_CHOICES} options, including STOP.")
     return vocabulary
 
 
@@ -182,11 +182,9 @@ def make_payload(
     criteria: dict[str, str | None] = {}
     for label, token in items:
         if token is None:
-            criteria[label] = "Append nothing; the existing answer is complete."
-        elif len(token) == 1 and label == token:
-            criteria[label] = None  # The label itself specifies the character.
+            criteria[label] = "The complete answer is " + json.dumps(prefix, ensure_ascii=False)
         else:
-            criteria[label] = f"Append exactly the text {json.dumps(token, ensure_ascii=False)}."
+            criteria[label] = "The answer begins with " + json.dumps(prefix + token, ensure_ascii=False)
     state: dict[str, Any] = {"user_prompt": prompt, "answer_prefix": prefix}
     if context is not None:
         state["context"] = context

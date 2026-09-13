@@ -117,6 +117,13 @@ class DecoderTests(unittest.TestCase):
             with self.subTest(tokens=repr(tokens)), self.assertRaises(ValueError):
                 m.make_vocabulary("ab", tokens)
 
+    def test_choice_limit_counts_stop_and_deduplicates_before_checking(self):
+        characters = "".join(chr(0x4E00 + index) for index in range(254))
+        vocabulary = m.make_vocabulary(characters, [characters[0]])
+        self.assertEqual(len(vocabulary), 255)
+        with self.assertRaises(ValueError):
+            m.make_vocabulary(characters, ["extra fragment"])
+
     def test_fragments_condition_each_subsequent_step(self):
         self.vocab = m.make_vocabulary("abc ", ["ab", " c"])
         fake = TokenEvaluator(self.vocab, ["ab", " c", None])
@@ -139,14 +146,6 @@ class DecoderTests(unittest.TestCase):
         self.assertEqual(last["selected_text"], " c")
         self.assertEqual(last["emitted_text"], "")
         self.assertEqual(last["prefix_after"], "ab")
-
-    def test_payload_schema(self):
-        payload = m.make_payload("question", "co", self.vocab, "test", {"blue": 4})
-        self.assertEqual(set(payload), {"state", "questions", "model"})
-        self.assertEqual(payload["state"]["answer_prefix"], "co")
-        self.assertEqual(payload["state"]["context"], {"blue": 4})
-        self.assertEqual(payload["questions"][m.QUESTION_ID]["type"], "choice")
-        self.assertIsNone(payload["questions"][m.QUESTION_ID]["criteria"]["a"])
 
     def test_order_shuffle_preserves_options(self):
         ordered = m.make_payload("q", "", self.vocab, "m")

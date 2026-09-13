@@ -1,0 +1,27 @@
+name: Offline checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.10', '3.12', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Behavioral regression tests
+        run: python -m unittest discover -s tests -v
+      - name: Decoder dry run
+        run: python typesafe_llm.py 'Complete a short sentence.' --tokens-json examples/subword_tokens.json --dry-run
+      - name: Benchmark dry run
+        run: python benchmark.py --dry-run --repeats 2 --max-total-calls 7

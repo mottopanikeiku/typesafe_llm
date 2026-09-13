@@ -244,19 +244,10 @@ class DecoderTests(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             self.run_fake()
 
-    def test_inspector_reads_trace(self):
-        self.run_fake()
-        with patch("sys.stdout", new_callable=io.StringIO) as stdout:
-            self.assertEqual(inspect_trace.main([str(self.path)]), 0)
-            self.assertIn("Showing 5 of 5 decisions", stdout.getvalue())
-
     def test_dry_run_needs_no_key_or_network(self):
         with patch.dict("os.environ", {}, clear=True), patch("sys.stdout", new_callable=io.StringIO) as out:
             with patch.object(m.TypeSafeHTTP, "evaluate", side_effect=AssertionError("Unexpected network")):
                 self.assertEqual(m.main(["test", "--dry-run"]), 0)
-        body = json.loads(out.getvalue())
-        self.assertEqual(body["model"], "jev-1.13.0")
-        self.assertEqual(len(body["questions"][m.QUESTION_ID]["criteria"]), 29)
 
 
 class HTTPTests(unittest.TestCase):

@@ -30,7 +30,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 VERSION = "1.0.0"
 DEFAULT_BASE_URL = "https://api.typesafe.ai"
-DEFAULT_MODEL = "jev-1.13.0"
+DEFAULT_MODEL = "jev-latest"
 QUESTION_ID = "next_character"
 STOP = "STOP"
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024

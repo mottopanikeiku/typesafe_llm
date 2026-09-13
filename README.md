@@ -5,8 +5,9 @@ Choice question over an alphabet plus STOP, appends one selected character to
 `answer_prefix`, and repeats. No other model proposes the answer.
 
 **Python 3.10+; no third-party packages or SDK installation required.**
-You need your own TypeSafe API key. The default model is `jev-1.13.0`, matching
-the model used in the original experiments; override it with `--model` when needed.
+You need your own TypeSafe API key. The default model is `jev-latest`, as
+recommended by TypeSafe's current API documentation. Use `--list-models` and
+`--model` to pin an available version for repeatable comparisons.
 
 This is a runnable wrapper, not a claim that Jev is a good text generator. It
 does not expose weights, hidden activations, native token probabilities, or the

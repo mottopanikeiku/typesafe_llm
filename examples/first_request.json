@@ -1,5 +1,5 @@
 {
-  "model": "jev-1.13.0",
+  "model": "jev-latest",
   "state": {
     "user_prompt": "What is the opposite of hot? Answer with one lowercase word.",
     "answer_prefix": ""

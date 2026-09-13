@@ -44,8 +44,11 @@ def main(argv: list[str] | None = None) -> int:
                 entropy = -math.fsum(p * math.log2(p) for p in normalized)
                 selected = event["selected_label"]
                 top = sorted(probabilities, key=probabilities.get, reverse=True)[:args.top]
-                alternatives = ", ".join(f"{label!r}:{probabilities[label]:.3f}" for label in top)
-                print(f"{event['call']:>4}  {selected!r:<12}  {event['api_choice']!r:<12}  "
+                vocabulary = event.get("vocabulary", {})
+                alternatives = ", ".join(f"{vocabulary.get(label, label)!r}:{probabilities[label]:.3f}" for label in top)
+                picked_text = vocabulary.get(selected, selected)
+                api_text = vocabulary.get(event["api_choice"], event["api_choice"])
+                print(f"{event['call']:>4}  {picked_text!r:<12}  {api_text!r:<12}  "
                       f"{probabilities[selected]:>6.3f}   "
                       f"{event['decoding_probabilities'][selected]:>6.3f}   "
                       f"{entropy:>6.2f}   {alternatives}")

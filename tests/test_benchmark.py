@@ -46,13 +46,13 @@ class BenchmarkTests(unittest.TestCase):
         self.next_run += 1
         suite_path = self.root / f"suite-{self.next_run}.json"
         suite_path.write_text(json.dumps({"cases": cases}), encoding="utf-8")
-        args = benchmark.parser().parse_args([str(suite_path), *options])
+        args = benchmark.parser().parse_args([str(suite_path), "--decoder", "character", *options])
         instructions = benchmark.validate_options(args)
         validated = benchmark.load_suite(suite_path)
         plan = benchmark.make_plan(validated, args, instructions)
         path = self.root / f"campaign-{self.next_run}"
         result = benchmark.run_campaign(evaluator, cases=validated, plan=plan,
-                                        campaign_dir=path, stderr=io.StringIO())
+                                        campaign_dir=path, stderr=io.StringIO(), lexicon=args.word_lexicon)
         return result, path
 
     @staticmethod

@@ -1,0 +1,69 @@
+{
+  "characters": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,!?:;+-=*/()[]{}_'\"\\\n",
+  "cases": [
+    {
+      "id": "capital-spain",
+      "prompt": "What is the capital of Spain? Reply with only the city name, with its usual capitalization and no punctuation.",
+      "expected": [
+        "Madrid"
+      ]
+    },
+    {
+      "id": "capital-egypt",
+      "prompt": "What is the capital of Egypt? Reply with only the city name, with its usual capitalization and no punctuation.",
+      "expected": [
+        "Cairo"
+      ]
+    },
+    {
+      "id": "antonym-empty",
+      "prompt": "What is the opposite of empty? Reply with one lowercase word and no punctuation.",
+      "expected": [
+        "full"
+      ]
+    },
+    {
+      "id": "continue-winter",
+      "prompt": "Write exactly the English season winter in lowercase, without punctuation.",
+      "prefix": "win",
+      "expected": [
+        "winter"
+      ]
+    },
+    {
+      "id": "water-formula",
+      "prompt": "Write the chemical formula for water. Use ordinary ASCII digits and no other text.",
+      "expected": [
+        "H2O"
+      ]
+    },
+    {
+      "id": "copy-stone",
+      "prompt": "Copy exactly the text between brackets, without brackets or any other text: [stone]",
+      "expected": [
+        "stone"
+      ]
+    },
+    {
+      "id": "context-violet",
+      "prompt": "What color is Lio's ticket according to the supplied context? Reply with only the lowercase color.",
+      "context": {
+        "tickets": {
+          "Lio": "violet",
+          "Nora": "orange",
+          "Asha": "yellow"
+        }
+      },
+      "expected": [
+        "violet"
+      ]
+    },
+    {
+      "id": "copy-slash",
+      "prompt": "Copy exactly the text between brackets, without brackets or any other text: [red/blue]",
+      "expected": [
+        "red/blue"
+      ]
+    }
+  ]
+}

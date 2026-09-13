@@ -159,6 +159,8 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--shuffle-options", action="store_true")
     p.add_argument("--instructions-file", type=Path)
     p.add_argument("--tokens-json", type=Path, help="Fixed JSON list of text fragments shared by all cases; never derive from targets.")
+    p.add_argument("--decoder", choices=("lexical", "character"), default="lexical")
+    p.add_argument("--lexicon", type=Path, default=decoder.DEFAULT_LEXICON)
     p.add_argument("--out-dir", type=Path, default=Path("runs"))
     p.add_argument("--dry-run", action="store_true")
     return p
@@ -177,7 +179,10 @@ def validate_options(args: argparse.Namespace) -> str:
     decoder.TypeSafeHTTP("offline-validation", args.base_url, args.timeout)
     if args.out_dir.exists() and not args.out_dir.is_dir():
         raise ValueError("Output directory is not a directory.")
-    instructions = decoder.INSTRUCTIONS if args.instructions_file is None else args.instructions_file.read_text(encoding="utf-8")
+    args.word_lexicon = decoder.WordLexicon.load(args.lexicon) if args.decoder == "lexical" else None
+    instructions = decoder.LEXICAL_INSTRUCTIONS if args.word_lexicon is not None else decoder.INSTRUCTIONS
+    if args.instructions_file is not None:
+        instructions = args.instructions_file.read_text(encoding="utf-8")
     if not instructions.strip():
         raise ValueError("Instructions cannot be empty.")
     instructions.encode("utf-8")
@@ -213,6 +218,10 @@ def make_plan(cases: list[dict[str, Any]], args: argparse.Namespace, instruction
         "temperature": args.temperature, "top_k": args.top_k, "top_p": args.top_p,
         "shuffle_options": args.shuffle_options, "instructions": instructions,
         "tokens": args.tokens,
+        "decoder": args.decoder,
+        "lexicon": None if args.word_lexicon is None else {
+            "source": args.word_lexicon.source, "sha256": args.word_lexicon.sha256,
+        },
         "seed_schedule": "seed + zero-based sample index; repeat-major, suite order; local only",
         "max_total_calls": args.max_total_calls,
         "hard_max_attempts": min(args.max_total_calls, len(samples) * args.max_calls),
@@ -247,8 +256,12 @@ def aggregate(records: list[dict[str, Any]], budget: SharedBudget, elapsed: floa
 
 
 def run_campaign(client: decoder.Evaluator, *, cases: list[dict[str, Any]],
-                 plan: dict[str, Any], campaign_dir: Path, stderr: TextIO = sys.stderr) -> dict[str, Any]:
+                 plan: dict[str, Any], campaign_dir: Path, stderr: TextIO = sys.stderr,
+                 lexicon: decoder.WordLexicon | None = None) -> dict[str, Any]:
     """Run an already validated plan in a new directory. No request uses expected."""
+    actual_lexicon = None if lexicon is None else {"source": lexicon.source, "sha256": lexicon.sha256}
+    if actual_lexicon != plan["lexicon"]:
+        raise ValueError("The supplied lexicon does not match the validated campaign plan.")
     campaign_dir.mkdir(parents=True, exist_ok=False)
     budget = SharedBudget(client, plan["max_total_calls"])
     expected_by_id = {case["id"]: case["expected"] for case in cases}
@@ -296,7 +309,7 @@ def run_campaign(client: decoder.Evaluator, *, cases: list[dict[str, Any]],
                     budget, prompt=sample["prompt"], prefix=sample["prefix"],
                     context=sample["context"], vocabulary=decoder.make_vocabulary(sample["characters"], plan["tokens"]),
                     instructions=plan["instructions"], config=config, run_dir=run_dir,
-                    stdout=output, stderr=stderr,
+                    stdout=output, stderr=stderr, lexicon=lexicon,
                 )
             except KeyboardInterrupt:
                 summary = {"stop_reason": "interrupted", "error": None}
@@ -352,7 +365,8 @@ def main(argv: list[str] | None = None) -> int:
         parent = Path(tempfile.mkdtemp(prefix="benchmark_", dir=args.out_dir))
         campaign_dir = parent / "campaign"
         print(f"[benchmark] {campaign_dir}\n[limit] <= {plan['hard_max_attempts']} HTTP attempts; no retries.", file=sys.stderr)
-        results = run_campaign(client, cases=cases, plan=plan, campaign_dir=campaign_dir)
+        results = run_campaign(client, cases=cases, plan=plan, campaign_dir=campaign_dir,
+                               lexicon=args.word_lexicon)
         print(json.dumps({"status": results["status"], "aggregate": results["aggregate"],
                           "results_path": str(campaign_dir / "results.json")}, indent=2))
         if results["error"]:

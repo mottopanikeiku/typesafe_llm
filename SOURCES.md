@@ -19,8 +19,9 @@ versions, and returned model names record what an experiment actually used.
 The documented API provides evaluation and model listing. It does not provide
 training/fine-tuning endpoints, weights, hidden activations, a native tokenizer,
 or native vocabulary logits. This decoder constructs an autoregressive process
-outside Jev by repeatedly asking a new prefix-conditioned question. It neither
-trains Jev nor creates a separately trained model from Jev outputs.
+outside Jev by repeatedly asking the same fixed-vocabulary question with an
+updated prefix in `state`. It neither trains Jev nor creates a separately
+trained model from Jev outputs.
 
 ## Public API contract
 
@@ -53,15 +54,12 @@ normalization, temperature, top-k, and top-p.
 [Speculative fan-out](https://docs.typesafe.ai/patterns/fan-out.md) supports many
 independent questions over one shared state. It does not establish that asking
 about several different candidate prefixes in that state is identical to
-separate requests with isolated states. This decoder conditions every emission on
-the actual selected prefix. Lexical ranking groups all share that same prefix,
-prompt, and context; they do not speculate over different future states.
-
-Lexical mode ranks disjoint groups of dictionary continuations, then makes a
-separate final Choice over the shortlisted candidates plus the original vocabulary
-and STOP. Probabilities from different groups are not treated as globally
-comparable. The final distribution is conditional on the shortlist; even a score
-of one does not prove that the answer is factually correct.
+separate requests with isolated states. This decoder sends one Choice question
+per request and conditions every emission on the actual selected prefix.
+The option labels and descriptions stay fixed; only `state.answer_prefix` grows.
+There are no speculative future states, dictionary proposals, or changing
+shortlists. The response is still a distribution over supplied options rather
+than a native generative model vocabulary.
 
 [Noul](https://docs.typesafe.ai/primitives/noul.md) returns an independent yes
 probability. A set of Noul scores is not a mutually exclusive Choice distribution;
@@ -72,26 +70,6 @@ decoder retains Choice rather than presenting those scores as token probabilitie
 shows Choice composition and beam search through a taxonomy. That is useful
 research context, not evidence that an arbitrary language vocabulary will work
 well or that text-generation probabilities are calibrated.
-
-## Independent lexical data
-
-`data/english_words.json` is adapted from Hermit Dave's
-[FrequencyWords English 2018 list](https://github.com/hermitdave/FrequencyWords/blob/master/content/2018/en/en_50k.txt),
-derived from OpenSubtitles2018. The repository's
-[license declaration](https://github.com/hermitdave/FrequencyWords#license)
-assigns **CC BY-SA 4.0 to content** (its MIT license applies to code, not the lists).
-
-This adaptation retains the first 20,000 lowercase ASCII alphabetic words in
-source frequency order and removes counts and other entries. The data file
-records creator, source, changes, and the
-[CC BY-SA 4.0 license](https://creativecommons.org/licenses/by-sa/4.0/).
-This data license does not relicense the Python code. Run configuration and
-campaign manifests identify the lexicon by source path and SHA-256.
-
-The dictionary was selected independently of evaluation targets and contains no
-TypeSafe-generated training examples. It supplies candidate text, not answers or
-a hidden language model. English frequency bias, limited candidate coverage,
-case handling, and shortlist truncation remain limitations.
 
 ## Usage and pricing
 

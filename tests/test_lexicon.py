@@ -86,6 +86,12 @@ class LexicalTests(unittest.TestCase):
         self.assertEqual(summary["stop_reason"], "max_calls")
         self.assertEqual(client.payloads, [])
 
+    def test_word_boundary_uses_original_vocabulary_before_lexical_completion(self):
+        client = LexicalFixture(self.base, character="b")
+        summary, output = self.generate(client, prefix="", max_calls=1)
+        self.assertEqual(output, "b")
+        self.assertEqual(summary["api_calls_started"], 1)
+
     def test_selection_failure_never_emits_a_proposed_word(self):
         client = LexicalFixture(self.base, fail_at=2)
         summary, output = self.generate(client)

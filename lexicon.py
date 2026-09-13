@@ -34,7 +34,11 @@ class WordLexicon:
     def groups(self, prefix: str, vocabulary: dict[str, str | None]) -> dict[str, dict[str, str]]:
         """Propose suffixes of matching words in frequency order, without editing prefix."""
         match = WORD_END.search(prefix)
-        stem = match.group() if match else ""
+        # Seed a word from the original vocabulary first. Otherwise the global
+        # frequency shortlist favors generic words before a useful prefix exists.
+        if match is None:
+            return {}
+        stem = match.group()
         upper = len(stem) > 1 and stem.isupper()
         capitalized = stem[:1].isupper()
         seen = set(vocabulary.values())

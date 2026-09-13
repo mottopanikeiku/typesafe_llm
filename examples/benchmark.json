@@ -1,0 +1,37 @@
+{
+  "characters": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,!?:;+-=*/()[]{}_'\"\\\n",
+  "cases": [
+    {
+      "id": "capital-france",
+      "prompt": "What is the capital of France? Reply with only the city name, with its usual capitalization and no punctuation.",
+      "expected": ["Paris"]
+    },
+    {
+      "id": "copy-mixed-case",
+      "prompt": "Copy the text between brackets exactly, without brackets or any other text: [Blue-7]",
+      "expected": ["Blue-7"]
+    },
+    {
+      "id": "integer-addition",
+      "prompt": "Compute 17 + 25. Reply with only the decimal integer.",
+      "expected": ["42"]
+    },
+    {
+      "id": "context-lookup",
+      "prompt": "Using the supplied context, what is Mira's locker number? Reply with only its decimal integer.",
+      "context": {"lockers": {"Mira": 18, "Ivo": 23, "Tess": 41}},
+      "expected": ["18"]
+    },
+    {
+      "id": "literal-prefix-continuation",
+      "prompt": "Write exactly the English weekday immediately after Monday, with its usual capitalization and no punctuation.",
+      "prefix": "Tu",
+      "expected": ["Tuesday"]
+    },
+    {
+      "id": "copy-two-lines",
+      "prompt": "Reply with exactly two lines: first line cat, second line dog. Do not add a trailing newline or any punctuation.",
+      "expected": ["cat\ndog"]
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+{
+  "characters": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 .,!?:;+-=*/()[]{}_'\"\\\n",
+  "cases": [
+    {
+      "id": "capital-italy",
+      "prompt": "What is the capital of Italy? Reply with only the city name, with its usual capitalization and no punctuation.",
+      "expected": [
+        "Rome"
+      ]
+    },
+    {
+      "id": "integer-subtraction",
+      "prompt": "Compute 9 - 4. Reply with only the decimal integer.",
+      "expected": [
+        "5"
+      ]
+    },
+    {
+      "id": "context-color",
+      "prompt": "Using the supplied context, what color is Nia's badge? Reply with only the lowercase color.",
+      "context": {
+        "badges": {
+          "Nia": "green",
+          "Omar": "red",
+          "Ari": "blue"
+        }
+      },
+      "expected": [
+        "green"
+      ]
+    },
+    {
+      "id": "continue-greeting",
+      "prompt": "Write exactly the lowercase English greeting hello, with no punctuation.",
+      "prefix": "hel",
+      "expected": [
+        "hello"
+      ]
+    },
+    {
+      "id": "copy-punctuation",
+      "prompt": "Copy exactly the text between brackets, without brackets or any other text: [OK!]",
+      "expected": [
+        "OK!"
+      ]
+    },
+    {
+      "id": "weekday-thursday",
+      "prompt": "Write exactly the English weekday immediately after Wednesday, with its usual capitalization and no punctuation.",
+      "expected": [
+        "Thursday"
+      ]
+    },
+    {
+      "id": "copy-comma",
+      "prompt": "Copy exactly the text between brackets, without brackets or any other text: [red,blue]",
+      "expected": [
+        "red,blue"
+      ]
+    },
+    {
+      "id": "integer-product",
+      "prompt": "Compute 20 times 5. Reply with only the decimal integer.",
+      "expected": [
+        "100"
+      ]
+    }
+  ]
+}

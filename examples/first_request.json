@@ -1,0 +1,44 @@
+{
+  "model": "jev-1.13.0",
+  "state": {
+    "user_prompt": "What is the opposite of hot? Answer with one lowercase word.",
+    "answer_prefix": ""
+  },
+  "questions": {
+    "next_character": {
+      "type": "choice",
+      "instructions": "Select the next single character of a correct, concise answer to `user_prompt`, using `context` as task data when present. `answer_prefix` is the answer already written. Continue it literally: it may end in the middle of a word. Do not restart, rewrite, or repeat the prefix. Select the one character that should immediately follow it. Use the available character choices. Choose STOP only when the existing prefix is already a complete answer. An empty prefix is not complete.",
+      "criteria": {
+        "a": null,
+        "b": null,
+        "c": null,
+        "d": null,
+        "e": null,
+        "f": null,
+        "g": null,
+        "h": null,
+        "i": null,
+        "j": null,
+        "k": null,
+        "l": null,
+        "m": null,
+        "n": null,
+        "o": null,
+        "p": null,
+        "q": null,
+        "r": null,
+        "s": null,
+        "t": null,
+        "u": null,
+        "v": null,
+        "w": null,
+        "x": null,
+        "y": null,
+        "z": null,
+        "SPACE": "Append exactly the character \" \".",
+        "PERIOD": "Append exactly the character \".\".",
+        "STOP": "Append nothing; the existing answer is complete."
+      }
+    }
+  }
+}

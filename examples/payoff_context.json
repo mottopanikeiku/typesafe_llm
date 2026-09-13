@@ -1,0 +1,13 @@
+{
+  "experiment": "An opaque bag contains exactly the tokens listed in bag. One token is selected uniformly at random. Its color is not observed. All counts and payoff rules are exact. A player guesses one color before observing the selected token. The guess does not influence the draw.",
+  "bag": {
+    "red": 7,
+    "blue": 3
+  },
+  "payoff": {
+    "correct_red_guess": 1,
+    "correct_blue_guess": 4,
+    "incorrect_guess": 0
+  },
+  "objective": "Maximize expected points from this single draw."
+}

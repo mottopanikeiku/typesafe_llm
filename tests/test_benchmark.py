@@ -25,12 +25,14 @@ class ScriptedEvaluator:
         if isinstance(step, BaseException):
             raise step
         labels = payload["questions"][decoder.QUESTION_ID]["criteria"]
+        probabilities = {label: step.get(label, 0) if isinstance(step, dict) else float(label == step) for label in labels}
+        selected = max(probabilities, key=probabilities.get) if isinstance(step, dict) else step
         return decoder.APIResult({
             "model": "offline-scripted-fixture-not-a-model-measurement",
             "usage": {"input_tokens": 5, "output_tokens": 1},
             "answers": {decoder.QUESTION_ID: {
-                "type": "choice", "choice": step, "confidence": 1,
-                "probabilities": {label: float(label == step) for label in labels},
+                "type": "choice", "choice": selected, "confidence": 1,
+                "probabilities": probabilities,
             }},
         }, "offline-fixture-request", 0.0)
 
@@ -46,7 +48,7 @@ class BenchmarkTests(unittest.TestCase):
         self.next_run += 1
         suite_path = self.root / f"suite-{self.next_run}.json"
         suite_path.write_text(json.dumps({"cases": cases}), encoding="utf-8")
-        args = benchmark.parser().parse_args([str(suite_path), *options])
+        args = benchmark.parser().parse_args([str(suite_path), "--search", "greedy", *options])
         instructions = benchmark.validate_options(args)
         validated = benchmark.load_suite(suite_path)
         plan = benchmark.make_plan(validated, args, instructions)
@@ -72,7 +74,18 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual([payload["state"]["answer_prefix"] for payload in evaluator.payloads],
                          ["x", "xa", "y", "ya"])
         for payload in evaluator.payloads:
-            self.assertEqual(payload["questions"], evaluator.payloads[0]["questions"])
+            self.assertEqual(list(payload["questions"][decoder.QUESTION_ID]["criteria"]),
+                             list(evaluator.payloads[0]["questions"][decoder.QUESTION_ID]["criteria"]))
+
+    def test_beam_exploration_consumes_the_shared_campaign_budget(self):
+        evaluator = ScriptedEvaluator([{"a": .6, "b": .4}, {decoder.STOP: 1}, {decoder.STOP: 1}])
+        result, _ = self.campaign(evaluator, self.cases(2), "--search", "beam",
+                                 "--beam-width", "2", "--max-total-calls", "3")
+        self.assertEqual(result["aggregate"]["api_calls_started"], 3)
+        self.assertEqual(result["aggregate"]["completed_exact_matches"], 1)
+        self.assertEqual(result["aggregate"]["not_run"], 1)
+        self.assertEqual(result["samples"][0]["output"], "a")
+        self.assertEqual(result["status"], "budget_exhausted")
 
     def test_per_case_vocabulary_overrides_are_rejected(self):
         suite_path = self.root / "mixed-vocabularies.json"

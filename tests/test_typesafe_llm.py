@@ -67,6 +67,29 @@ class TokenEvaluator:
         }})
 
 
+class BranchEvaluator:
+    """Finite offline probability tables for search contracts, not model quality."""
+
+    def __init__(self, vocabulary, tables, observer=None):
+        self.vocabulary = vocabulary
+        self.tables = tables
+        self.observer = observer
+        self.payloads = []
+
+    def evaluate(self, payload):
+        self.payloads.append(copy.deepcopy(payload))
+        if self.observer is not None:
+            self.observer()
+        weights = self.tables[payload["state"]["answer_prefix"]]
+        if isinstance(weights, BaseException):
+            raise weights
+        probabilities = {label: weights.get(token, 0.0) for label, token in self.vocabulary.items()}
+        return m.APIResult({"model": "offline-branch-fixture", "answers": {
+            m.QUESTION_ID: {"type": "choice", "choice": max(probabilities, key=probabilities.get),
+                            "probabilities": probabilities},
+        }})
+
+
 class DecoderTests(unittest.TestCase):
     def setUp(self):
         self.vocab = m.make_vocabulary(m.ALPHABETS["lower"])
@@ -74,6 +97,7 @@ class DecoderTests(unittest.TestCase):
             "model": "jev-1.13.0", "max_calls": 20, "max_new_chars": 20,
             "seed": 7, "temperature": 0, "top_k": 0, "top_p": 1,
             "shuffle_options": False, "verbose": False,
+            "search": "greedy", "beam_width": 32, "beam_diversity": "token",
         }
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -137,7 +161,7 @@ class DecoderTests(unittest.TestCase):
         self.assertEqual(summary["new_characters"], 4)
         self.assertEqual(summary["api_calls_started"], 3)
         self.assertEqual(summary["stop_reason"], "stop")
-        self.assertTrue(all(options == fake.criteria[0] for options in fake.criteria))
+        self.assertTrue(all(list(options) == list(fake.criteria[0]) for options in fake.criteria))
 
     def test_character_limit_never_splits_or_resamples_a_fragment(self):
         self.vocab = m.make_vocabulary("abc ", ["ab", " c"])
@@ -161,15 +185,16 @@ class DecoderTests(unittest.TestCase):
     def test_offered_options_are_independent_of_prompt_prefix_and_context(self):
         first = m.make_payload("First task", "", self.vocab, "m", context={"task": 1})
         second = m.make_payload("Different task", 'ab "\n', self.vocab, "m", context={"task": 2})
-        self.assertEqual(first["questions"], second["questions"])
+        self.assertEqual(list(first["questions"][m.QUESTION_ID]["criteria"]),
+                         list(second["questions"][m.QUESTION_ID]["criteria"]))
         self.assertNotEqual(first["state"], second["state"])
 
-    def test_generation_keeps_every_option_and_description_at_word_boundaries(self):
+    def test_generation_keeps_every_output_option_at_word_boundaries(self):
         fake = FakeEvaluator(target="ab ab")
         summary = self.run_fake(fake, shuffle_options=True)
         self.assertEqual(self.stdout.getvalue(), "ab ab")
         self.assertEqual(summary["stop_reason"], "stop")
-        options = [list(payload["questions"][m.QUESTION_ID]["criteria"].items()) for payload in fake.payloads]
+        options = [list(payload["questions"][m.QUESTION_ID]["criteria"]) for payload in fake.payloads]
         self.assertEqual([payload["state"]["answer_prefix"] for payload in fake.payloads],
                          ["", "a", "ab", "ab ", "ab a", "ab ab"])
         for offered in options:
@@ -307,6 +332,68 @@ class DecoderTests(unittest.TestCase):
         self.assertIn("raw_probabilities", events[2])
         self.assertIn("decoding_probabilities", events[2])
         self.assertEqual(events[-1]["event"], "summary")
+
+    def test_beam_cache_preserves_provenance_across_tokenizations_at_call_cap(self):
+        self.vocab = m.make_vocabulary("ab", ["ab"])
+        fake = BranchEvaluator(self.vocab, {"": {"a": .45, "ab": .55}, "a": {"b": 1}, "ab": {None: 1}})
+        summary = self.run_fake(fake, search="beam", beam_width=2, max_new_chars=2, max_calls=3)
+        self.assertEqual(self.stdout.getvalue(), "ab")
+        self.assertEqual(summary["stop_reason"], "stop")
+        self.assertEqual((summary["api_calls_started"], summary["cache_hits"]), (3, 1))
+        self.assertCountEqual([payload["state"]["answer_prefix"] for payload in fake.payloads], ["", "a", "ab"])
+        events = [json.loads(line) for line in (self.path / "trace.jsonl").read_text().splitlines()]
+        requests = {event["call"]: event["payload"] for event in events if event["event"] == "request"}
+        decisions = [event for event in events if event["event"] == "decision"]
+        self.assertEqual([event["selected_text"] for event in decisions], ["a", "b", None])
+        for decision in decisions:
+            self.assertEqual(requests[decision["call"]]["state"]["answer_prefix"], decision["prefix_before"])
+
+    def test_beam_failure_preserves_completion_without_streaming_speculation(self):
+        self.vocab = m.make_vocabulary("ab")
+        fake = BranchEvaluator(
+            self.vocab, {"": {"a": .6, "b": .4}, "a": {None: 1}, "b": m.APIError("Offline branch failure")},
+            observer=lambda: self.assertEqual(self.stdout.getvalue(), ""),
+        )
+        summary = self.run_fake(fake, search="beam", beam_width=2)
+        self.assertEqual(summary["stop_reason"], "error")
+        self.assertEqual(summary["search_stop_reason"], "error")
+        self.assertEqual((summary["api_calls_started"], summary["successful_responses"]), (3, 2))
+        self.assertEqual(self.stdout.getvalue(), "a")
+        self.assertEqual((self.path / "answer.txt").read_text(), "a")
+        self.assertEqual((self.path / "candidate.txt").read_text(), "a")
+
+    def test_beam_interrupt_preserves_observed_partial_output(self):
+        self.vocab = m.make_vocabulary("a")
+        fake = BranchEvaluator(self.vocab, {"": {"a": 1}, "a": KeyboardInterrupt()})
+        summary = self.run_fake(fake, search="beam")
+        self.assertEqual(summary["stop_reason"], "interrupted")
+        self.assertEqual((summary["api_calls_started"], summary["successful_responses"]), (2, 1))
+        self.assertEqual(self.stdout.getvalue(), "a")
+        self.assertEqual((self.path / "answer.txt").read_text(), "a")
+
+    def test_beam_budget_stop_is_distinct_from_selected_terminal_path(self):
+        self.vocab = m.make_vocabulary("ab")
+        fake = BranchEvaluator(self.vocab, {"": {"a": .6, "b": .4}, "a": {None: 1}})
+        summary = self.run_fake(fake, search="beam", beam_width=2, max_calls=2)
+        self.assertEqual(self.stdout.getvalue(), "a")
+        self.assertEqual(summary["stop_reason"], "stop")
+        self.assertEqual(summary["search_stop_reason"], "max_calls")
+        self.assertEqual(summary["api_calls_started"], 2)
+
+    def test_beam_budget_never_fabricates_stop_for_partial_output(self):
+        self.vocab = m.make_vocabulary("ab")
+        fake = BranchEvaluator(self.vocab, {"": {"a": .6, "b": .4}})
+        summary = self.run_fake(fake, search="beam", beam_width=2, max_calls=1)
+        self.assertEqual(self.stdout.getvalue(), "a")
+        self.assertEqual(summary["stop_reason"], "max_calls")
+        self.assertEqual(summary["api_calls_started"], 1)
+
+    def test_beam_sampling_conflicts_fail_before_any_request(self):
+        fake = FakeEvaluator()
+        with self.assertRaises(ValueError):
+            self.run_fake(fake, search="beam", temperature=.8)
+        self.assertEqual(fake.payloads, [])
+        self.assertFalse(self.path.exists())
 
     def test_existing_directory_not_overwritten(self):
         self.path.mkdir()

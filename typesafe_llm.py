@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Experimental autoregressive decoder for TypeSafe Jev. Python 3.10+, no dependencies.
 
-Every request offers the same fixed vocabulary of text tokens and STOP.
-All text still comes from TypeSafe choices, NOT native next-token probabilities.
+Contextual beam search over a fixed vocabulary of text tokens and STOP.
+Scores are TypeSafe Choice outputs, NOT native next-token probabilities.
 
     export TYPESAFE_API_KEY='...'
     python typesafe_llm.py 'What is the opposite of hot? One lowercase word.'
@@ -29,7 +29,9 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-VERSION = "4.0.0"
+from search import BeamSearch, PrefixEvaluation
+
+VERSION = "5.0.0"
 DEFAULT_BASE_URL = "https://api.typesafe.ai"
 DEFAULT_MODEL = "jev-latest"
 QUESTION_ID = "next_token"
@@ -41,10 +43,10 @@ ALPHABETS = {
     "ascii": "".join(chr(i) for i in range(32, 127)) + "\n",
 }
 INSTRUCTIONS = (
-    "Choose the exact next token to append to answer_prefix to answer user_prompt. "
-    "Use context as task data when present. Select from the same fixed vocabulary on every step. "
-    "A token can end inside a word and need not be a complete answer. "
-    "Continue the actual answer_prefix without replacing, skipping, or correcting earlier text. "
+    "Choose the candidate text that is a prefix of the correct, concise answer to user_prompt. "
+    "Use context as task data when present. Each candidate extends answer_prefix by exactly "
+    "one token; candidates can end inside a word and need not be complete answers. "
+    "Prefer the continuation that can lead to the correct answer, not an unrelated word. "
     "Choose STOP only if answer_prefix is already a complete correct answer."
 )
 
@@ -185,9 +187,9 @@ def make_payload(
     criteria: dict[str, str | None] = {}
     for label, token in items:
         if token is None:
-            criteria[label] = "End the answer without appending text."
+            criteria[label] = "The complete answer is " + json.dumps(prefix, ensure_ascii=False)
         else:
-            criteria[label] = "Append exactly " + json.dumps(token, ensure_ascii=False)
+            criteria[label] = "The answer begins with " + json.dumps(prefix + token, ensure_ascii=False)
     state: dict[str, Any] = {"user_prompt": prompt, "answer_prefix": prefix}
     if context is not None:
         state["context"] = context
@@ -274,26 +276,49 @@ def checkpoint_text(path: Path, text: str) -> None:
     temporary.replace(path)
 
 
+def validate_search_options(
+    search: str, beam_width: int, beam_diversity: str, temperature: float, top_k: int, top_p: float,
+) -> None:
+    if search not in ("greedy", "beam"):
+        raise ValueError("Search must be greedy or beam.")
+    if beam_diversity not in ("none", "token"):
+        raise ValueError("Beam diversity must be none or token.")
+    if type(beam_width) is not int or beam_width < 1:
+        raise ValueError("Beam width must be a positive integer.")
+    if search == "beam" and (temperature != 0 or top_k != 0 or top_p != 1):
+        raise ValueError("Sampling controls require --search greedy; beam search uses all reported scores.")
+
+
 def generate(
     client: Evaluator, *, prompt: str, prefix: str, vocabulary: dict[str, str | None],
     config: dict[str, Any], run_dir: Path, stdout: TextIO, stderr: TextIO,
     context: Any = None, instructions: str = INSTRUCTIONS,
 ) -> dict[str, Any]:
-    """Generate into a fresh directory. Does not print or log authentication headers."""
+    """Generate into a fresh directory; speculative beam text is never streamed."""
+    validate_search_options(config["search"], config["beam_width"], config["beam_diversity"],
+                            config["temperature"], config["top_k"], config["top_p"])
+    vocabulary = dict(vocabulary)
+    if config["shuffle_options"]:
+        items = list(vocabulary.items())
+        random.Random(f"{config['seed']}:options").shuffle(items)
+        vocabulary = dict(items)
+    beam = (BeamSearch(prefix, vocabulary, config["beam_width"], config["max_new_chars"], config["beam_diversity"])
+            if config["search"] == "beam" else None)
     run_dir.mkdir(parents=True, exist_ok=False)
     write_json(run_dir / "config.json", {
-        "decoder_version": VERSION, "trace_version": 4, "python_version": sys.version,
+        "decoder_version": VERSION, "trace_version": 5, "python_version": sys.version,
         "prompt": prompt, "initial_prefix": prefix, "context": context,
         "instructions": instructions, "vocabulary": vocabulary, **config,
     })
     answer_path = run_dir / "answer.txt"
     checkpoint_text(answer_path, prefix)
     text, calls, successes, new_tokens = prefix, 0, 0, 0
+    path_log_probability, path_tokens, cache_hits = 0.0, 0, 0
     token_totals = {"input_tokens": 0, "output_tokens": 0}
     missing_usage = {"input_tokens": 0, "output_tokens": 0}
     models: set[str] = set()
+    cache: dict[str, PrefixEvaluation] = {}
     rng = random.Random(config["seed"])
-    order_rng = random.Random(f"{config['seed']}:options") if config["shuffle_options"] else None
     started = time.perf_counter()
     reason, error = "max_calls", None
     with (run_dir / "trace.jsonl").open("x", encoding="utf-8", newline="\n") as trace:
@@ -303,9 +328,17 @@ def generate(
             }, ensure_ascii=False, allow_nan=False) + "\n")
             trace.flush()
 
-        def evaluate(payload: dict[str, Any]) -> APIResult:
-            nonlocal calls, successes
-            # Count before dispatch: failures and interruptions consume an attempt too.
+        def evaluate(current_prefix: str) -> PrefixEvaluation | None:
+            nonlocal calls, successes, cache_hits
+            if current_prefix in cache:
+                evaluation = cache[current_prefix]
+                cache_hits += 1
+                log("cache_hit", prefix=current_prefix, source_call=evaluation.call)
+                return evaluation
+            if calls >= config["max_calls"]:
+                return None
+            payload = make_payload(prompt, current_prefix, vocabulary, config["model"], context, instructions)
+            # One owner counts before dispatch. Failed attempts are never refunded.
             calls += 1
             log("request", call=calls, payload=payload)
             result = client.evaluate(payload)
@@ -322,63 +355,112 @@ def generate(
                     token_totals[key] += value
                 else:
                     missing_usage[key] += 1
-            return result
+            api_choice, probabilities = read_choice(result.body, vocabulary)
+            evaluation = PrefixEvaluation(calls, api_choice, probabilities)
+            cache[current_prefix] = evaluation
+            return evaluation
+
+        def commit(evaluation: PrefixEvaluation, selected: str, policy: dict[str, float], over_limit: bool = False) -> None:
+            nonlocal text, new_tokens, path_log_probability, path_tokens
+            probabilities = evaluation.probabilities
+            token = vocabulary[selected]
+            emitted = "" if over_limit else token
+            next_text = text if emitted is None else text + emitted
+            total = math.fsum(probabilities.values())
+            if not over_limit:
+                path_log_probability += math.log(probabilities[selected]) - math.log(total)
+                path_tokens += 1
+            log("decision", call=evaluation.call, prefix_before=text, prefix_after=next_text,
+                api_choice=evaluation.api_choice, selected_label=selected,
+                selected_text=token, emitted_text=emitted, vocabulary=vocabulary,
+                raw_probabilities=probabilities, raw_probability_sum=total,
+                decoding_probabilities=policy, selection_method=config["search"],
+                path_log_probability=path_log_probability)
+            if config["verbose"]:
+                top = sorted(probabilities, key=probabilities.get, reverse=True)[:5]
+                details = ", ".join(f"{vocabulary[k]!r}={probabilities[k]:.3f}" for k in top)
+                stderr.write(f"\n[{evaluation.call}] selected={token!r}; API={vocabulary[evaluation.api_choice]!r}; {details}\n")
+                stderr.flush()
+            if emitted:
+                text = next_text
+                new_tokens += 1
+                checkpoint_text(answer_path, text)
+                stdout.write(emitted)
+                stdout.flush()
+
+        def checkpoint_beam() -> None:
+            if beam is None:
+                return
+            snapshot = beam.snapshot()
+            log("frontier", call=calls, **snapshot)
+            candidate = beam.result()
+            checkpoint_text(run_dir / "candidate.txt", candidate.text)
+            if config["verbose"]:
+                leaders = ", ".join(repr(row["prefix"]) for row in snapshot["active"][:3])
+                stderr.write(f"\n[beam depth={beam.depth} calls={calls}/{config['max_calls']}] "
+                             f"active: {leaders}; best complete: "
+                             f"{candidate.text if candidate.completed else None!r}\n")
+                stderr.flush()
 
         try:
             stdout.write(prefix)
             stdout.flush()
-            template = make_payload(prompt, prefix, vocabulary, config["model"], context, instructions, order_rng)
-            while calls < config["max_calls"]:
-                if len(text) - len(prefix) >= config["max_new_chars"]:
-                    reason = "max_new_chars"
-                    break
-                # Reuse the exact question and options; only the prefix advances.
-                payload = {**template, "state": {**template["state"], "answer_prefix": text}}
-                result = evaluate(payload)
-                api_choice, probabilities = read_choice(result.body, vocabulary)
-                selected, policy = choose_label(
-                    probabilities, api_choice, config["temperature"], config["top_k"], config["top_p"], rng,
-                )
-                token = vocabulary[selected]
-                over_limit = token is not None and (
-                    len(text) - len(prefix) + len(token) > config["max_new_chars"]
-                )
-                emitted = "" if over_limit else token
-                next_text = text if emitted is None else text + emitted
-                log("decision", call=calls, prefix_before=text, prefix_after=next_text,
-                    api_choice=api_choice, selected_label=selected,
-                    selected_text=token, emitted_text=emitted,
-                    vocabulary=vocabulary,
-                    raw_probabilities=probabilities, raw_probability_sum=math.fsum(probabilities.values()),
-                    decoding_probabilities=policy)
-                if config["verbose"]:
-                    top = sorted(probabilities, key=probabilities.get, reverse=True)[:5]
-                    details = ", ".join(f"{vocabulary[k]!r}={probabilities[k]:.3f}" for k in top)
-                    stderr.write(f"\n[{calls}] selected={token!r}; API={vocabulary[api_choice]!r}; {details}\n")
-                    stderr.flush()
-                if over_limit:
-                    reason = "max_new_chars"
-                    break
-                if token is None:
-                    reason = "stop"
-                    break
-                text = next_text
-                new_tokens += 1
-                checkpoint_text(answer_path, text)
-                stdout.write(token)
-                stdout.flush()
+            if beam is not None:
+                while beam.pending_prefix is not None:
+                    evaluation = evaluate(beam.pending_prefix)
+                    if evaluation is None:
+                        reason = "max_calls"
+                        break
+                    depth = beam.depth
+                    beam.observe(evaluation)
+                    if beam.depth != depth:
+                        checkpoint_beam()
+                else:
+                    reason = "frontier_exhausted"
             else:
-                reason = "max_calls"
+                while calls < config["max_calls"]:
+                    if len(text) - len(prefix) >= config["max_new_chars"]:
+                        reason = "max_new_chars"
+                        break
+                    evaluation = evaluate(text)
+                    if evaluation is None:
+                        reason = "max_calls"
+                        break
+                    selected, policy = choose_label(
+                        evaluation.probabilities, evaluation.api_choice,
+                        config["temperature"], config["top_k"], config["top_p"], rng,
+                    )
+                    token = vocabulary[selected]
+                    over_limit = token is not None and len(text) - len(prefix) + len(token) > config["max_new_chars"]
+                    commit(evaluation, selected, policy, over_limit)
+                    if over_limit:
+                        reason = "max_new_chars"
+                        break
+                    if token is None:
+                        reason = "stop"
+                        break
         except KeyboardInterrupt:
             reason = "interrupted"
         except Exception as exc:
-            # Preserve successful earlier characters and a machine-readable error.
             reason, error = "error", f"{type(exc).__name__}: {exc}"
+
+        search_stop_reason = reason
+        if beam is not None:
+            checkpoint_beam()
+            result = beam.result()
+            # Only the selected path becomes output; exploration never edits stdout.
+            for step in result.steps:
+                commit(step.evaluation, step.label, {step.label: 1.0})
+            if reason not in ("error", "interrupted"):
+                reason = "stop" if result.completed else "max_new_chars" if reason == "frontier_exhausted" else reason
         summary = {
-            "stop_reason": reason, "error": error,
+            "stop_reason": reason, "search_stop_reason": search_stop_reason, "error": error,
             "api_calls_started": calls, "successful_responses": successes,
             "new_characters": len(text) - len(prefix), "total_characters": len(text),
-            "new_tokens": new_tokens,
+            "new_tokens": new_tokens, "evaluated_prefixes": len(cache), "cache_hits": cache_hits,
+            "sequence_log_probability": path_log_probability,
+            "sequence_score": path_log_probability / path_tokens if path_tokens else None,
+            "score_definition": "Mean normalized Choice log probability per selected token, including STOP.",
             "elapsed_seconds": round(time.perf_counter() - started, 3),
             "reported_token_totals": token_totals, "responses_missing_usage": missing_usage,
             "model_versions_seen": sorted(models),
@@ -401,18 +483,21 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--alphabet", choices=ALPHABETS, default="lower", help="lower: a-z, space, period; ascii: printable ASCII + newline.")
     p.add_argument("--characters-json", type=Path, help="Custom JSON string or list of single characters; overrides --alphabet.")
     p.add_argument("--tokens-json", type=Path, help="JSON array of text fragments to add to the character vocabulary.")
+    p.add_argument("--search", choices=("beam", "greedy"), default="beam", help="beam: compare character paths; greedy: commit each local choice.")
+    p.add_argument("--beam-width", type=int, default=32, help="Maximum live hypotheses per token depth.")
+    p.add_argument("--beam-diversity", choices=("token", "none"), default="token", help="Reserve beam coverage for distinct ending tokens; none uses probability alone.")
     p.add_argument("--model", default=os.environ.get("TYPESAFE_DEFAULT_MODEL", "").strip() or DEFAULT_MODEL)
     p.add_argument("--base-url", default=os.environ.get("TYPESAFE_BASE_URL", "").strip() or DEFAULT_BASE_URL)
     p.add_argument("--timeout", type=float, default=30.0, help="Timeout in seconds for network operations.")
-    p.add_argument("--max-calls", type=int, default=80, help="Hard limit on generation HTTP attempts (no retries).")
+    p.add_argument("--max-calls", type=int, default=256, help="Hard limit on all explored-prefix HTTP attempts (no retries).")
     p.add_argument("--max-new-chars", type=int, default=80, help="Additional characters, excluding any supplied prefix.")
-    p.add_argument("--temperature", type=float, default=0.0, help="0 = greedy; >0 = sample locally from Choice probabilities.")
+    p.add_argument("--temperature", type=float, default=0.0, help="With --search greedy: 0 = argmax, >0 = local sampling.")
     p.add_argument("--top-k", type=int, default=0, help="Sampling: keep this many options; 0 keeps all.")
     p.add_argument("--top-p", type=float, default=1.0, help="Sampling: nucleus probability cutoff after temperature/top-k.")
     p.add_argument("--seed", type=int, help="Local sampling seed; logged. Does not seed the server.")
     p.add_argument("--shuffle-options", action="store_true", help="Shuffle criteria once per run, then keep that order; logged.")
     p.add_argument("--out-dir", type=Path, default=Path("runs"), help="Parent directory for a unique run folder.")
-    p.add_argument("--verbose", "-v", action="store_true", help="Show top raw probabilities on stderr.")
+    p.add_argument("--verbose", "-v", action="store_true", help="Show search frontiers and selected-token probabilities on stderr.")
     p.add_argument("--dry-run", action="store_true", help="Print the first request body without a key or a network call.")
     p.add_argument("--list-models", action="store_true", help="Make one authenticated GET request and print available models.")
     return p
@@ -429,6 +514,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.list_models and args.dry_run:
         p.error("--list-models and --dry-run are mutually exclusive.")
     try:
+        validate_search_options(args.search, args.beam_width, args.beam_diversity, args.temperature, args.top_k, args.top_p)
         if args.list_models:
             client = TypeSafeHTTP(os.environ.get("TYPESAFE_API_KEY", ""), args.base_url, args.timeout)
             print(json.dumps(client.list_models().body, indent=2, ensure_ascii=False))
@@ -472,7 +558,7 @@ def main(argv: list[str] | None = None) -> int:
         run_dir = args.out_dir / run_name
         config = {name: getattr(args, name) for name in (
             "model", "base_url", "timeout", "max_calls", "max_new_chars", "temperature",
-            "top_k", "top_p", "shuffle_options", "verbose",
+            "top_k", "top_p", "shuffle_options", "verbose", "search", "beam_width", "beam_diversity",
         )}
         config["seed"] = seed
         print(f"[run] {run_dir}\n[limit] <= {args.max_calls} HTTP attempts; no retries. "
@@ -484,8 +570,11 @@ def main(argv: list[str] | None = None) -> int:
                            context=context, instructions=instructions)
         print(f"\n[{summary['stop_reason']}] {summary['new_characters']} new characters "
               f"in {summary['new_tokens']} tokens; "
-              f"{summary['api_calls_started']} attempted calls; "
-              f"{summary['elapsed_seconds']}s.\n[saved] {run_dir / 'answer.txt'}", file=sys.stderr)
+              f"{summary['api_calls_started']} attempted calls; {summary['elapsed_seconds']}s.\n"
+              f"[search ended: {summary['search_stop_reason']}] "
+              f"{summary['evaluated_prefixes']} scored prefixes; {summary['cache_hits']} cache hits; "
+              f"mean path log score={summary['sequence_score']}.\n"
+              f"[saved] {run_dir / 'answer.txt'}", file=sys.stderr)
         if summary["error"]:
             print(summary["error"], file=sys.stderr)
             return 1

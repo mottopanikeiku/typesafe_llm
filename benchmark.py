@@ -27,7 +27,7 @@ from typing import Any, TextIO
 import typesafe_llm as decoder
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 USAGE_KEYS = ("input_tokens", "output_tokens")
 
 
@@ -147,7 +147,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--base-url", default=os.environ.get("TYPESAFE_BASE_URL", "").strip() or decoder.DEFAULT_BASE_URL)
     p.add_argument("--timeout", type=float, default=30.0)
     p.add_argument("--max-total-calls", type=int, default=100, help="Hard shared HTTP-attempt cap, including failed calls.")
-    p.add_argument("--max-calls", type=int, default=24, help="Per-sample attempt cap, additionally clipped to shared remainder.")
+    p.add_argument("--max-calls", type=int, default=256, help="Per-sample explored-prefix attempt cap, clipped to shared remainder.")
     p.add_argument("--max-new-chars", type=int, default=40, help="Per-sample character cap unless overridden in the suite.")
     p.add_argument("--repeats", type=int, default=1)
     p.add_argument("--seed", type=int, default=0, help="Sample seed is this value plus its zero-based schedule index.")
@@ -157,6 +157,9 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--shuffle-options", action="store_true")
     p.add_argument("--instructions-file", type=Path)
     p.add_argument("--tokens-json", type=Path, help="Fixed JSON list of text fragments shared by all cases; never derive from targets.")
+    p.add_argument("--search", choices=("beam", "greedy"), default="beam")
+    p.add_argument("--beam-width", type=int, default=32)
+    p.add_argument("--beam-diversity", choices=("token", "none"), default="token")
     p.add_argument("--out-dir", type=Path, default=Path("runs"))
     p.add_argument("--dry-run", action="store_true")
     return p
@@ -168,6 +171,7 @@ def validate_options(args: argparse.Namespace) -> str:
     if (not math.isfinite(args.temperature) or args.temperature < 0 or args.top_k < 0
             or not math.isfinite(args.top_p) or not 0 < args.top_p <= 1):
         raise ValueError("Use finite temperature >= 0, top-k >= 0 and 0 < top-p <= 1.")
+    decoder.validate_search_options(args.search, args.beam_width, args.beam_diversity, args.temperature, args.top_k, args.top_p)
     if not args.model.strip():
         raise ValueError("Model cannot be empty.")
     # Constructor validation is local only; this placeholder is not a credential
@@ -214,6 +218,7 @@ def make_plan(cases: list[dict[str, Any]], args: argparse.Namespace, instruction
         "base_url": args.base_url, "timeout": args.timeout,
         "temperature": args.temperature, "top_k": args.top_k, "top_p": args.top_p,
         "shuffle_options": args.shuffle_options, "instructions": instructions,
+        "search": args.search, "beam_width": args.beam_width, "beam_diversity": args.beam_diversity,
         "characters": characters, "tokens": args.tokens,
         "seed_schedule": "seed + zero-based sample index; repeat-major, suite order; local only",
         "max_total_calls": args.max_total_calls,
@@ -287,6 +292,7 @@ def run_campaign(client: decoder.Evaluator, *, cases: list[dict[str, Any]],
             save()
             config = {key: plan[key] for key in (
                 "model", "base_url", "timeout", "temperature", "top_k", "top_p", "shuffle_options",
+                "search", "beam_width", "beam_diversity",
             )}
             config.update(seed=sample["seed"], max_calls=min(sample["max_calls"], budget.remaining),
                           max_new_chars=sample["max_new_chars"], verbose=False)

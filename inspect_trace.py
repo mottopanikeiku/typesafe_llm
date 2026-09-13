@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inspect a character-decoder trace without making any API calls."""
+"""Inspect selected token paths and explored search frontiers without API calls."""
 from __future__ import annotations
 
 import argparse
@@ -13,7 +13,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("path", type=Path, help="A run directory or its trace.jsonl file.")
     parser.add_argument("--top", type=int, default=5, help="Number of top raw alternatives per decision.")
-    parser.add_argument("--limit", type=int, default=40, help="Max displayed decisions; 0 shows all.")
+    parser.add_argument("--limit", type=int, default=40, help="Max displayed decisions/frontiers each; 0 shows all.")
+    parser.add_argument("--frontiers", action="store_true", help="Show beam hypotheses separately from the selected output path.")
     args = parser.parse_args(argv)
     if args.top < 1 or args.limit < 0:
         parser.error("--top must be positive; --limit must be nonnegative.")
@@ -21,6 +22,7 @@ def main(argv: list[str] | None = None) -> int:
     print("Call  Picked        API           Raw P    Local P  Entropy   Top raw alternatives")
     print("-" * 108)
     count, shown, summary = 0, 0, None
+    frontier_count, frontiers = 0, []
     try:
         with path.open(encoding="utf-8") as stream:
             for line_number, line in enumerate(stream, 1):
@@ -32,6 +34,10 @@ def main(argv: list[str] | None = None) -> int:
                     raise ValueError(f"Invalid JSON at line {line_number}: {exc}") from None
                 if event.get("event") == "summary":
                     summary = event
+                if event.get("event") == "frontier":
+                    frontier_count += 1
+                    if args.frontiers and (not args.limit or len(frontiers) < args.limit):
+                        frontiers.append(event)
                 if event.get("event") != "decision":
                     continue
                 count += 1
@@ -57,9 +63,22 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(f"\nShowing {shown} of {count} decisions. Entropy is in bits over normalized Choice scores,")
     print("not Jev's native token distribution. Local P includes your decoding transformations.")
+    if frontier_count:
+        print("Decisions are the final selected path, not every explored branch. Source call numbers may reflect cached evaluations.")
+    if args.frontiers and frontier_count:
+        print(f"\nSearch frontiers: showing {len(frontiers)} of {frontier_count}; hypotheses are not emitted text.")
+        for frontier in frontiers:
+            active = ", ".join(repr(row["prefix"]) for row in frontier["active"][:args.top])
+            complete = frontier["completed"]
+            completed_text = None if complete is None else complete["prefix"]
+            print(f"Depth {frontier['depth']:>3}  calls={frontier['call']:<5} active: {active}")
+            print(f"                       best complete: {completed_text!r}")
     if summary:
         print(f"Stop reason: {summary['stop_reason']}; attempted API calls: {summary['api_calls_started']}; "
               f"new characters: {summary['new_characters']}.")
+        if "search_stop_reason" in summary:
+            print(f"Search ended: {summary['search_stop_reason']}; evaluated prefixes: {summary['evaluated_prefixes']}; "
+                  f"cache hits: {summary['cache_hits']}; mean path log score: {summary['sequence_score']}.")
         if summary.get("error"):
             print(f"Run error: {summary['error']}")
     return 0

@@ -7,7 +7,7 @@ Scores are TypeSafe Choice outputs, NOT native next-token probabilities.
     export TYPESAFE_API_KEY='...'
     python typesafe_llm.py 'What is the opposite of hot? One lowercase word.'
 
-Protocol references are in SOURCES.md. All API calls require your own key.
+Protocol references are in docs/SOURCES.md. All API calls require your own key.
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from search import BeamSearch, PrefixEvaluation
 
-VERSION = "5.0.0"
+VERSION = "experimental"
 DEFAULT_BASE_URL = "https://api.typesafe.ai"
 DEFAULT_MODEL = "jev-latest"
 QUESTION_ID = "next_token"

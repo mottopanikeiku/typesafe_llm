@@ -9,7 +9,7 @@ versions, and returned model names record what an experiment actually used.
 
 - [TypeSafe AI](https://typesafe.ai/) is the company/lab.
 - [System One](https://docs.typesafe.ai/concepts/system-one.md) describes its
-  structured-decision paradigm. Jev is its flagship and first System One model.
+  structured-decision paradigm. Jev is its first System One model.
 - [AI primer](https://docs.typesafe.ai/introduction/machine-learning-primer.md)
   describes Reinforcement Learning for Calibrated Decisions (RLCD), rather than
   optimizing generated text.
@@ -26,11 +26,11 @@ separately trained model from Jev outputs.
 
 ## Public API contract
 
-- [HTTP reference](https://docs.typesafe.ai/api.md): authenticated
+- [HTTP reference](https://docs.typesafe.ai/api.md): API-key-protected
   `POST https://api.typesafe.ai/v1/systemone`; JSON fields `model`, `state`, and
   `questions`; typed `answers`, model name, and usage in the response.
 - [Live OpenAPI schema](https://api.typesafe.ai/openapi.json): evaluation and
-  authenticated `GET /v1/models`. The returned model can differ from a requested
+  API-key-protected `GET /v1/models`. The returned model can differ from a requested
   alias, so the decoder records both instead of assuming an immutable alias.
 - [Quick start](https://docs.typesafe.ai/introduction/quickstart.md): API-key
   setup, bearer authentication, and the currently recommended `jev-latest` alias.

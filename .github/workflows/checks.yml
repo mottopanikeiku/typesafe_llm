@@ -21,6 +21,8 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Behavioral regression tests
         run: python -m unittest discover -s tests -v
+      - name: Offline search comparison
+        run: python offline_demo.py
       - name: Decoder dry run
         run: python typesafe_llm.py 'Complete a short sentence.' --tokens-json examples/subword_tokens.json --dry-run
       - name: Benchmark dry run

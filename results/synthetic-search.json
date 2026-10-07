@@ -1,0 +1,1097 @@
+{
+  "source": "Invented score tables; not Jev measurements; zero API calls.",
+  "score_definition": "Mean normalized Choice log probability per action, including STOP.",
+  "fixtures": [
+    {
+      "name": "original",
+      "vocabulary": {
+        "a": "a",
+        "b": "b",
+        "STOP": null
+      },
+      "scores": {
+        "": {
+          "a": 0.6,
+          "b": 0.4,
+          "STOP": 0.0
+        },
+        "a": {
+          "a": 0.4,
+          "b": 0.0,
+          "STOP": 0.6
+        },
+        "b": {
+          "a": 0.0,
+          "b": 0.0,
+          "STOP": 1.0
+        },
+        "aa": {
+          "a": 0.0,
+          "b": 0.0,
+          "STOP": 1.0
+        }
+      },
+      "max_new_chars": 3,
+      "completed_paths": [
+        {
+          "output": "aa",
+          "labels": [
+            "a",
+            "a",
+            "STOP"
+          ],
+          "actions_including_stop": 3,
+          "log_probability": -1.4271163556401456,
+          "mean_log_score": -0.47570545188004854
+        },
+        {
+          "output": "a",
+          "labels": [
+            "a",
+            "STOP"
+          ],
+          "actions_including_stop": 2,
+          "log_probability": -1.0216512475319814,
+          "mean_log_score": -0.5108256237659907
+        },
+        {
+          "output": "b",
+          "labels": [
+            "b",
+            "STOP"
+          ],
+          "actions_including_stop": 2,
+          "log_probability": -0.916290731874155,
+          "mean_log_score": -0.4581453659370775
+        }
+      ],
+      "exhaustive_best": {
+        "output": "b",
+        "labels": [
+          "b",
+          "STOP"
+        ],
+        "actions_including_stop": 2,
+        "log_probability": -0.916290731874155,
+        "mean_log_score": -0.4581453659370775
+      },
+      "comparisons": [
+        {
+          "policy": "beam width 1",
+          "evaluation_budget": 4,
+          "evaluated_prefixes": 3,
+          "cache_hits": 0,
+          "output": "aa",
+          "selected_labels": [
+            "a",
+            "a",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": -1.4271163556401456,
+          "mean_log_score": -0.47570545188004854,
+          "search_stop_reason": "frontier_exhausted",
+          "matches_exhaustive_score": false
+        },
+        {
+          "policy": "beam width 2",
+          "evaluation_budget": 4,
+          "evaluated_prefixes": 4,
+          "cache_hits": 0,
+          "output": "b",
+          "selected_labels": [
+            "b",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": -0.916290731874155,
+          "mean_log_score": -0.4581453659370775,
+          "search_stop_reason": "frontier_exhausted",
+          "matches_exhaustive_score": true
+        },
+        {
+          "policy": "beam width 2, token diversity",
+          "evaluation_budget": 4,
+          "evaluated_prefixes": 4,
+          "cache_hits": 0,
+          "output": "b",
+          "selected_labels": [
+            "b",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": -0.916290731874155,
+          "mean_log_score": -0.4581453659370775,
+          "search_stop_reason": "frontier_exhausted",
+          "matches_exhaustive_score": true
+        },
+        {
+          "policy": "beam width 2, cap 2",
+          "evaluation_budget": 2,
+          "evaluated_prefixes": 2,
+          "cache_hits": 0,
+          "output": "a",
+          "selected_labels": [
+            "a",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": -1.0216512475319814,
+          "mean_log_score": -0.5108256237659907,
+          "search_stop_reason": "max_calls",
+          "matches_exhaustive_score": false
+        },
+        {
+          "policy": "unpruned beam",
+          "evaluation_budget": 4,
+          "evaluated_prefixes": 4,
+          "cache_hits": 0,
+          "output": "b",
+          "selected_labels": [
+            "b",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": -0.916290731874155,
+          "mean_log_score": -0.4581453659370775,
+          "search_stop_reason": "frontier_exhausted",
+          "matches_exhaustive_score": true
+        }
+      ]
+    },
+    {
+      "name": "diversity helps",
+      "vocabulary": {
+        "a": "a",
+        "b": "b",
+        "c": "c",
+        "STOP": null
+      },
+      "scores": {
+        "": {
+          "a": 0.6,
+          "b": 0.4,
+          "c": 0,
+          "STOP": 0
+        },
+        "a": {
+          "a": 0.5,
+          "b": 0.05,
+          "c": 0.45,
+          "STOP": 0
+        },
+        "b": {
+          "a": 0.8,
+          "b": 0.01,
+          "c": 0.19,
+          "STOP": 0
+        },
+        "aa": {
+          "a": 0.99,
+          "b": 0,
+          "c": 0,
+          "STOP": 0.01
+        },
+        "ab": {
+          "a": 0.99,
+          "b": 0,
+          "c": 0,
+          "STOP": 0.01
+        },
+        "ac": {
+          "a": 0.0,
+          "b": 0,
+          "c": 0,
+          "STOP": 1.0
+        },
+        "ba": {
+          "a": 0.99,
+          "b": 0,
+          "c": 0,
+          "STOP": 0.01
+        },
+        "bb": {
+          "a": 0.99,
+          "b": 0,
+          "c": 0,
+          "STOP": 0.01
+        },
+        "bc": {
+          "a": 0.99,
+          "b": 0,
+          "c": 0,
+          "STOP": 0.01
+        }
+      },
+      "max_new_chars": 2,
+      "completed_paths": [
+        {
+          "output": "aa",
+          "labels": [
+            "a",
+            "a",
+            "STOP"
+          ],
+          "actions_including_stop": 3,
+          "log_probability": -5.809142990314027,
+          "mean_log_score": -1.9363809967713423
+        },
+        {
+          "output": "ab",
+          "labels": [
+            "a",
+            "b",
+            "STOP"
+          ],
+          "actions_including_stop": 3,
+          "log_probability": -8.111728083308073,
+          "mean_log_score": -2.7039093611026908
+        },
+        {
+          "output": "ac",
+          "labels": [
+            "a",
+            "c",
+            "STOP"
+          ],
+          "actions_including_stop": 3,
+          "log_probability": -1.3093333199837622,
+          "mean_log_score": -0.43644443999458743
+        },
+        {
+          "output": "ba",
+          "labels": [
+            "b",
+            "a",
+            "STOP"
+          ],
+          "actions_including_stop": 3,
+          "log_probability": -5.744604469176456,
+          "mean_log_score": -1.914868156392152
+        },
+        {
+          "output": "bb",
+          "labels": [
+            "b",
+            "b",
+            "STOP"
+          ],
+          "actions_including_stop": 3,
+          "log_probability": -10.126631103850336,
+          "mean_log_score": -3.3755437012834455
+        },
+        {
+          "output": "bc",
+          "labels": [
+            "b",
+            "c",
+            "STOP"
+          ],
+          "actions_including_stop": 3,
+          "log_probability": -7.182192124683897,
+          "mean_log_score": -2.394064041561299
+        }
+      ],
+      "exhaustive_best": {
+        "output": "ac",
+        "labels": [
+          "a",
+          "c",
+          "STOP"
+        ],
+        "actions_including_stop": 3,
+        "log_probability": -1.3093333199837622,
+        "mean_log_score": -0.43644443999458743
+      },
+      "comparisons": [
+        {
+          "policy": "beam width 1",
+          "evaluation_budget": 9,
+          "evaluated_prefixes": 3,
+          "cache_hits": 0,
+          "output": "aa",
+          "selected_labels": [
+            "a",
+            "a",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": -5.809142990314027,
+          "mean_log_score": -1.9363809967713423,
+          "search_stop_reason": "frontier_exhausted",
+          "matches_exhaustive_score": false
+        },
+        {
+          "policy": "beam width 2",
+          "evaluation_budget": 9,
+          "evaluated_prefixes": 5,
+          "cache_hits": 0,
+          "output": "ba",
+          "selected_labels": [
+            "b",
+            "a",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": -5.744604469176456,
+          "mean_log_score": -1.914868156392152,
+          "search_stop_reason": "frontier_exhausted",
+          "matches_exhaustive_score": false
+        },
+        {
+          "policy": "beam width 2, token diversity",
+          "evaluation_budget": 9,
+          "evaluated_prefixes": 5,
+          "cache_hits": 0,
+          "output": "ac",
+          "selected_labels": [
+            "a",
+            "c",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": -1.3093333199837622,
+          "mean_log_score": -0.43644443999458743,
+          "search_stop_reason": "frontier_exhausted",
+          "matches_exhaustive_score": true
+        },
+        {
+          "policy": "beam width 2, cap 2",
+          "evaluation_budget": 2,
+          "evaluated_prefixes": 2,
+          "cache_hits": 0,
+          "output": "aa",
+          "selected_labels": [
+            "a",
+            "a"
+          ],
+          "completed": false,
+          "log_probability": -1.203972804325936,
+          "mean_log_score": -0.601986402162968,
+          "search_stop_reason": "max_calls",
+          "matches_exhaustive_score": false
+        },
+        {
+          "policy": "unpruned beam",
+          "evaluation_budget": 9,
+          "evaluated_prefixes": 9,
+          "cache_hits": 0,
+          "output": "ac",
+          "selected_labels": [
+            "a",
+            "c",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": -1.3093333199837622,
+          "mean_log_score": -0.43644443999458743,
+          "search_stop_reason": "frontier_exhausted",
+          "matches_exhaustive_score": true
+        }
+      ]
+    },
+    {
+      "name": "diversity hurts",
+      "vocabulary": {
+        "a": "a",
+        "b": "b",
+        "c": "c",
+        "STOP": null
+      },
+      "scores": {
+        "": {
+          "a": 0.6,
+          "b": 0.4,
+          "c": 0,
+          "STOP": 0
+        },
+        "a": {
+          "a": 0.5,
+          "b": 0.05,
+          "c": 0.45,
+          "STOP": 0
+        },
+        "b": {
+          "a": 0.8,
+          "b": 0.01,
+          "c": 0.19,
+          "STOP": 0
+        },
+        "aa": {
+          "a": 0.0,
+          "b": 0,
+          "c": 0,
+          "STOP": 1.0
+        },
+        "ab": {
+          "a": 0.99,
+          "b": 0,
+          "c": 0,
+          "STOP": 0.01
+        },
+        "ac": {
+          "a": 0.99,
+          "b": 0,
+          "c": 0,
+          "STOP": 0.01
+        },
+        "ba": {
+          "a": 0.99,
+          "b": 0,
+          "c": 0,
+          "STOP": 0.01
+        },
+        "bb": {
+          "a": 0.99,
+          "b": 0,
+          "c": 0,
+          "STOP": 0.01
+        },
+        "bc": {
+          "a": 0.99,
+          "b": 0,
+          "c": 0,
+          "STOP": 0.01
+        }
+      },
+      "max_new_chars": 2,
+      "completed_paths": [
+        {
+          "output": "aa",
+          "labels": [
+            "a",
+            "a",
+            "STOP"
+          ],
+          "actions_including_stop": 3,
+          "log_probability": -1.203972804325936,
+          "mean_log_score": -0.4013242681086453
+        },
+        {
+          "output": "ab",
+          "labels": [
+            "a",
+            "b",
+            "STOP"
+          ],
+          "actions_including_stop": 3,
+          "log_probability": -8.111728083308073,
+          "mean_log_score": -2.7039093611026908
+        },
+        {
+          "output": "ac",
+          "labels": [
+            "a",
+            "c",
+            "STOP"
+          ],
+          "actions_including_stop": 3,
+          "log_probability": -5.914503505971853,
+          "mean_log_score": -1.9715011686572843
+        },
+        {
+          "output": "ba",
+          "labels": [
+            "b",
+            "a",
+            "STOP"
+          ],
+          "actions_including_stop": 3,
+          "log_probability": -5.744604469176456,
+          "mean_log_score": -1.914868156392152
+        },
+        {
+          "output": "bb",
+          "labels": [
+            "b",
+            "b",
+            "STOP"
+          ],
+          "actions_including_stop": 3,
+          "log_probability": -10.126631103850336,
+          "mean_log_score": -3.3755437012834455
+        },
+        {
+          "output": "bc",
+          "labels": [
+            "b",
+            "c",
+            "STOP"
+          ],
+          "actions_including_stop": 3,
+          "log_probability": -7.182192124683897,
+          "mean_log_score": -2.394064041561299
+        }
+      ],
+      "exhaustive_best": {
+        "output": "aa",
+        "labels": [
+          "a",
+          "a",
+          "STOP"
+        ],
+        "actions_including_stop": 3,
+        "log_probability": -1.203972804325936,
+        "mean_log_score": -0.4013242681086453
+      },
+      "comparisons": [
+        {
+          "policy": "beam width 1",
+          "evaluation_budget": 9,
+          "evaluated_prefixes": 3,
+          "cache_hits": 0,
+          "output": "aa",
+          "selected_labels": [
+            "a",
+            "a",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": -1.203972804325936,
+          "mean_log_score": -0.4013242681086453,
+          "search_stop_reason": "frontier_exhausted",
+          "matches_exhaustive_score": true
+        },
+        {
+          "policy": "beam width 2",
+          "evaluation_budget": 9,
+          "evaluated_prefixes": 5,
+          "cache_hits": 0,
+          "output": "aa",
+          "selected_labels": [
+            "a",
+            "a",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": -1.203972804325936,
+          "mean_log_score": -0.4013242681086453,
+          "search_stop_reason": "frontier_exhausted",
+          "matches_exhaustive_score": true
+        },
+        {
+          "policy": "beam width 2, token diversity",
+          "evaluation_budget": 9,
+          "evaluated_prefixes": 5,
+          "cache_hits": 0,
+          "output": "ba",
+          "selected_labels": [
+            "b",
+            "a",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": -5.744604469176456,
+          "mean_log_score": -1.914868156392152,
+          "search_stop_reason": "frontier_exhausted",
+          "matches_exhaustive_score": false
+        },
+        {
+          "policy": "beam width 2, cap 2",
+          "evaluation_budget": 2,
+          "evaluated_prefixes": 2,
+          "cache_hits": 0,
+          "output": "aa",
+          "selected_labels": [
+            "a",
+            "a"
+          ],
+          "completed": false,
+          "log_probability": -1.203972804325936,
+          "mean_log_score": -0.601986402162968,
+          "search_stop_reason": "max_calls",
+          "matches_exhaustive_score": false
+        },
+        {
+          "policy": "unpruned beam",
+          "evaluation_budget": 9,
+          "evaluated_prefixes": 9,
+          "cache_hits": 0,
+          "output": "aa",
+          "selected_labels": [
+            "a",
+            "a",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": -1.203972804325936,
+          "mean_log_score": -0.4013242681086453,
+          "search_stop_reason": "frontier_exhausted",
+          "matches_exhaustive_score": true
+        }
+      ]
+    },
+    {
+      "name": "characters only",
+      "vocabulary": {
+        "a": "a",
+        "b": "b",
+        "STOP": null
+      },
+      "scores": {
+        "": {
+          "a": 1.0,
+          "b": 0.0,
+          "STOP": 0.0
+        },
+        "a": {
+          "a": 0.0,
+          "b": 1.0,
+          "STOP": 0.0
+        },
+        "ab": {
+          "a": 0.0,
+          "b": 0.0,
+          "STOP": 1.0
+        }
+      },
+      "max_new_chars": 2,
+      "completed_paths": [
+        {
+          "output": "ab",
+          "labels": [
+            "a",
+            "b",
+            "STOP"
+          ],
+          "actions_including_stop": 3,
+          "log_probability": 0.0,
+          "mean_log_score": 0.0
+        }
+      ],
+      "exhaustive_best": {
+        "output": "ab",
+        "labels": [
+          "a",
+          "b",
+          "STOP"
+        ],
+        "actions_including_stop": 3,
+        "log_probability": 0.0,
+        "mean_log_score": 0.0
+      },
+      "comparisons": [
+        {
+          "policy": "beam width 1",
+          "evaluation_budget": 3,
+          "evaluated_prefixes": 3,
+          "cache_hits": 0,
+          "output": "ab",
+          "selected_labels": [
+            "a",
+            "b",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": 0.0,
+          "mean_log_score": 0.0,
+          "search_stop_reason": "frontier_exhausted",
+          "matches_exhaustive_score": true
+        },
+        {
+          "policy": "beam width 2",
+          "evaluation_budget": 3,
+          "evaluated_prefixes": 3,
+          "cache_hits": 0,
+          "output": "ab",
+          "selected_labels": [
+            "a",
+            "b",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": 0.0,
+          "mean_log_score": 0.0,
+          "search_stop_reason": "frontier_exhausted",
+          "matches_exhaustive_score": true
+        },
+        {
+          "policy": "beam width 2, token diversity",
+          "evaluation_budget": 3,
+          "evaluated_prefixes": 3,
+          "cache_hits": 0,
+          "output": "ab",
+          "selected_labels": [
+            "a",
+            "b",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": 0.0,
+          "mean_log_score": 0.0,
+          "search_stop_reason": "frontier_exhausted",
+          "matches_exhaustive_score": true
+        },
+        {
+          "policy": "beam width 2, cap 2",
+          "evaluation_budget": 2,
+          "evaluated_prefixes": 2,
+          "cache_hits": 0,
+          "output": "ab",
+          "selected_labels": [
+            "a",
+            "b"
+          ],
+          "completed": false,
+          "log_probability": 0.0,
+          "mean_log_score": 0.0,
+          "search_stop_reason": "max_calls",
+          "matches_exhaustive_score": false
+        },
+        {
+          "policy": "unpruned beam",
+          "evaluation_budget": 3,
+          "evaluated_prefixes": 3,
+          "cache_hits": 0,
+          "output": "ab",
+          "selected_labels": [
+            "a",
+            "b",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": 0.0,
+          "mean_log_score": 0.0,
+          "search_stop_reason": "frontier_exhausted",
+          "matches_exhaustive_score": true
+        }
+      ]
+    },
+    {
+      "name": "overlapping fragment lengths",
+      "vocabulary": {
+        "a": "a",
+        "b": "b",
+        "TOKEN_0002": "ab",
+        "STOP": null
+      },
+      "scores": {
+        "": {
+          "a": 0.45,
+          "b": 0,
+          "TOKEN_0002": 0.55,
+          "STOP": 0
+        },
+        "a": {
+          "a": 0,
+          "b": 1,
+          "TOKEN_0002": 0,
+          "STOP": 0
+        },
+        "ab": {
+          "a": 0,
+          "b": 0,
+          "TOKEN_0002": 0,
+          "STOP": 1
+        }
+      },
+      "max_new_chars": 2,
+      "completed_paths": [
+        {
+          "output": "ab",
+          "labels": [
+            "a",
+            "b",
+            "STOP"
+          ],
+          "actions_including_stop": 3,
+          "log_probability": -0.7985076962177716,
+          "mean_log_score": -0.2661692320725905
+        },
+        {
+          "output": "ab",
+          "labels": [
+            "TOKEN_0002",
+            "STOP"
+          ],
+          "actions_including_stop": 2,
+          "log_probability": -0.5978370007556204,
+          "mean_log_score": -0.2989185003778102
+        }
+      ],
+      "exhaustive_best": {
+        "output": "ab",
+        "labels": [
+          "a",
+          "b",
+          "STOP"
+        ],
+        "actions_including_stop": 3,
+        "log_probability": -0.7985076962177716,
+        "mean_log_score": -0.2661692320725905
+      },
+      "comparisons": [
+        {
+          "policy": "beam width 1",
+          "evaluation_budget": 3,
+          "evaluated_prefixes": 2,
+          "cache_hits": 0,
+          "output": "ab",
+          "selected_labels": [
+            "TOKEN_0002",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": -0.5978370007556204,
+          "mean_log_score": -0.2989185003778102,
+          "search_stop_reason": "frontier_exhausted",
+          "matches_exhaustive_score": false
+        },
+        {
+          "policy": "beam width 2",
+          "evaluation_budget": 3,
+          "evaluated_prefixes": 3,
+          "cache_hits": 1,
+          "output": "ab",
+          "selected_labels": [
+            "a",
+            "b",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": -0.7985076962177716,
+          "mean_log_score": -0.2661692320725905,
+          "search_stop_reason": "frontier_exhausted",
+          "matches_exhaustive_score": true
+        },
+        {
+          "policy": "beam width 2, token diversity",
+          "evaluation_budget": 3,
+          "evaluated_prefixes": 3,
+          "cache_hits": 1,
+          "output": "ab",
+          "selected_labels": [
+            "a",
+            "b",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": -0.7985076962177716,
+          "mean_log_score": -0.2661692320725905,
+          "search_stop_reason": "frontier_exhausted",
+          "matches_exhaustive_score": true
+        },
+        {
+          "policy": "beam width 2, cap 2",
+          "evaluation_budget": 2,
+          "evaluated_prefixes": 2,
+          "cache_hits": 0,
+          "output": "ab",
+          "selected_labels": [
+            "TOKEN_0002",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": -0.5978370007556204,
+          "mean_log_score": -0.2989185003778102,
+          "search_stop_reason": "max_calls",
+          "matches_exhaustive_score": false
+        },
+        {
+          "policy": "unpruned beam",
+          "evaluation_budget": 3,
+          "evaluated_prefixes": 3,
+          "cache_hits": 1,
+          "output": "ab",
+          "selected_labels": [
+            "a",
+            "b",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": -0.7985076962177716,
+          "mean_log_score": -0.2661692320725905,
+          "search_stop_reason": "frontier_exhausted",
+          "matches_exhaustive_score": true
+        }
+      ]
+    },
+    {
+      "name": "same-length fragment collision",
+      "vocabulary": {
+        "a": "a",
+        "b": "b",
+        "c": "c",
+        "TOKEN_0003": "ab",
+        "TOKEN_0004": "bc",
+        "STOP": null
+      },
+      "scores": {
+        "": {
+          "a": 0.5,
+          "b": 0,
+          "c": 0,
+          "TOKEN_0003": 0.5,
+          "TOKEN_0004": 0,
+          "STOP": 0
+        },
+        "a": {
+          "a": 0,
+          "b": 0,
+          "c": 0,
+          "TOKEN_0003": 0,
+          "TOKEN_0004": 0.8,
+          "STOP": 0.2
+        },
+        "ab": {
+          "a": 0,
+          "b": 0,
+          "c": 0.9,
+          "TOKEN_0003": 0,
+          "TOKEN_0004": 0,
+          "STOP": 0.1
+        },
+        "abc": {
+          "a": 0,
+          "b": 0,
+          "c": 0,
+          "TOKEN_0003": 0,
+          "TOKEN_0004": 0,
+          "STOP": 1
+        }
+      },
+      "max_new_chars": 3,
+      "completed_paths": [
+        {
+          "output": "abc",
+          "labels": [
+            "a",
+            "TOKEN_0004",
+            "STOP"
+          ],
+          "actions_including_stop": 3,
+          "log_probability": -0.916290731874155,
+          "mean_log_score": -0.3054302439580517
+        },
+        {
+          "output": "a",
+          "labels": [
+            "a",
+            "STOP"
+          ],
+          "actions_including_stop": 2,
+          "log_probability": -2.3025850929940455,
+          "mean_log_score": -1.1512925464970227
+        },
+        {
+          "output": "abc",
+          "labels": [
+            "TOKEN_0003",
+            "c",
+            "STOP"
+          ],
+          "actions_including_stop": 3,
+          "log_probability": -0.7985076962177715,
+          "mean_log_score": -0.2661692320725905
+        },
+        {
+          "output": "ab",
+          "labels": [
+            "TOKEN_0003",
+            "STOP"
+          ],
+          "actions_including_stop": 2,
+          "log_probability": -2.995732273553991,
+          "mean_log_score": -1.4978661367769954
+        }
+      ],
+      "exhaustive_best": {
+        "output": "abc",
+        "labels": [
+          "TOKEN_0003",
+          "c",
+          "STOP"
+        ],
+        "actions_including_stop": 3,
+        "log_probability": -0.7985076962177715,
+        "mean_log_score": -0.2661692320725905
+      },
+      "comparisons": [
+        {
+          "policy": "beam width 1",
+          "evaluation_budget": 4,
+          "evaluated_prefixes": 3,
+          "cache_hits": 0,
+          "output": "abc",
+          "selected_labels": [
+            "a",
+            "TOKEN_0004",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": -0.916290731874155,
+          "mean_log_score": -0.3054302439580517,
+          "search_stop_reason": "frontier_exhausted",
+          "matches_exhaustive_score": false
+        },
+        {
+          "policy": "beam width 2",
+          "evaluation_budget": 4,
+          "evaluated_prefixes": 4,
+          "cache_hits": 0,
+          "output": "abc",
+          "selected_labels": [
+            "TOKEN_0003",
+            "c",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": -0.7985076962177715,
+          "mean_log_score": -0.2661692320725905,
+          "search_stop_reason": "frontier_exhausted",
+          "matches_exhaustive_score": true
+        },
+        {
+          "policy": "beam width 2, token diversity",
+          "evaluation_budget": 4,
+          "evaluated_prefixes": 4,
+          "cache_hits": 0,
+          "output": "abc",
+          "selected_labels": [
+            "TOKEN_0003",
+            "c",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": -0.7985076962177715,
+          "mean_log_score": -0.2661692320725905,
+          "search_stop_reason": "frontier_exhausted",
+          "matches_exhaustive_score": true
+        },
+        {
+          "policy": "beam width 2, cap 2",
+          "evaluation_budget": 2,
+          "evaluated_prefixes": 2,
+          "cache_hits": 0,
+          "output": "a",
+          "selected_labels": [
+            "a",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": -2.3025850929940455,
+          "mean_log_score": -1.1512925464970227,
+          "search_stop_reason": "max_calls",
+          "matches_exhaustive_score": false
+        },
+        {
+          "policy": "unpruned beam",
+          "evaluation_budget": 4,
+          "evaluated_prefixes": 4,
+          "cache_hits": 0,
+          "output": "abc",
+          "selected_labels": [
+            "TOKEN_0003",
+            "c",
+            "STOP"
+          ],
+          "completed": true,
+          "log_probability": -0.7985076962177715,
+          "mean_log_score": -0.2661692320725905,
+          "search_stop_reason": "frontier_exhausted",
+          "matches_exhaustive_score": true
+        }
+      ]
+    }
+  ]
+}

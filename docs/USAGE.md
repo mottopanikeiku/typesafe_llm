@@ -430,6 +430,23 @@ their outputs are not measurements of Jev. Live experiments use the real API
 and save separate local traces. Request/response contracts and model limitations
 are documented in [SOURCES.md](SOURCES.md).
 
+## Exhaustive offline comparisons
+
+I extended `offline_demo.py` to enumerate all positive STOP paths in six
+invented finite tables, including token-diversity wins and losses and alternate
+fragment tokenizations. `python offline_demo.py --exhaustive --output
+results/synthetic-search.json` regenerates the committed comparison. The JSON
+keeps vocabulary and score tables beside every complete reference path and
+production-decoder output; no network client, credentials, timestamps, or local
+timings are included.
+
+The reference does not deduplicate by text: action count is part of the
+mean-log objective. It normalizes the full distribution before applying the
+character cap. Tests check path labels, not just matching output strings, and
+separate unfinished outputs from STOP completions. The original four-policy
+example remains available with `python offline_demo.py`. Neither example is a
+live quality measurement.
+
 ## Contextual search changes
 
 - Contextual candidate descriptions with an unchanged output vocabulary.

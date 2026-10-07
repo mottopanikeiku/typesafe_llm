@@ -1,48 +1,59 @@
 # Text generation from structured choices
 
-This is a small Python experiment that generates text by asking TypeSafe's Jev API to score a fixed alphabet plus STOP.
+I built a small Python decoder that generates text by asking TypeSafe's Jev API to score a fixed alphabet, optional text fragments, and STOP.
 
-**Question:** can a model designed for structured decisions produce useful text when its choices are treated as character continuations, and does beam search help enough to justify exploring more prefixes?
+**Question:** does exploring more prefixes—or preserving different token endings—recover a better-scoring completion?
 
-[typesafe_llm.py](typesafe_llm.py) sends the prompt and current prefix with the same output vocabulary on every step; candidate descriptions show the extended text. [search.py](search.py) keeps competing paths, accumulates normalized log scores, and selects a STOP-terminated path by mean log score, including STOP. [benchmark.py](benchmark.py) checks exact answers without sending expected answers to the model.
+**Result:** in [six invented finite examples](results/synthetic-search.json), I enumerated every positive STOP path and compared it with the real decoder. Token diversity helped in one example and hurt in another at the same beam width and evaluation count. Different tokenizations of the same text changed its mean-log score. These are **synthetic search results, not live Jev measurements or evidence of language quality**.
 
-**Public result:** the decoder and offline checks work as a search experiment, not evidence of a useful language model. Live results are private; no live accuracy or cost comparison is published here.
+[typesafe_llm.py](typesafe_llm.py) builds requests and caches scored prefixes; [search.py](search.py) implements beam pruning and ranking; [offline_demo.py](offline_demo.py) supplies invented distributions and an independent exhaustive reference.
 
-## What can be checked locally
+## What the finite comparisons show
 
-[offline_demo.py](offline_demo.py) runs the actual generator against an **invented score table**, with no key or network. Its finite branches allow an [exhaustive reference test](tests/test_offline_demo.py) to check the selected score independently.
+All numbers below come from [the committed synthetic results](results/synthetic-search.json). Each table is fully specified there, including vocabulary, character cap, complete paths, selected labels, and scores.
 
-| Policy | Prefix evaluations | Selected text | Mean log score |
-|---|---:|---|---:|
-| Greedy | 2 | `a` | −0.511 |
-| Beam, width 1 | 3 | `aa` | −0.476 |
-| Beam, width 2, capped at 2 evaluations | 2 | `a` | −0.511 |
-| Beam, width 2 | 4 | `b` | −0.458 |
+| Example | Ordinary beam, width 2 | Token-diverse beam, width 2 | Exhaustive best | Evaluations per policy |
+|---|---|---|---|---:|
+| Diversity helps | `ba`, −1.914868 | `ac`, −0.436444 | `ac`, −0.436444 | 5 |
+| Diversity hurts | `aa`, −0.401324 | `ba`, −1.914868 | `aa`, −0.401324 | 5 |
 
-These numbers come from the [demo's score table and policies](offline_demo.py), not Jev. The wider beam recovers the best-scoring completion in this example, but evaluates more prefixes; at the smaller budget it does not improve on greedy. Mean-log ranking can also prefer a longer path. None of this establishes which policy produces better real answers.
+Scores are the **mean normalized Choice log probability per selected action, including STOP**. Diversity reserves beam slots for distinct last-action labels before filling remaining slots by probability. It changes which paths survive; it does not change their scores. Neither policy dominates these deliberately constructed examples.
+
+The suite contains **22 completed paths and 30 policy comparisons** across six fixtures. A beam wide enough to avoid pruning matches the exhaustive best score in all six; the two-evaluation cap does not match it in any. These counts check implementation behavior on chosen examples, not a success rate on a representative dataset. The original greedy-versus-beam example is still available without flags.
+
+### The same text can have different scores
+
+In the overlapping-fragment fixture, both paths produce `ab`:
+
+| Selected actions | Path probability | Actions including STOP | Mean log score |
+|---|---:|---:|---:|
+| `ab`, STOP | 0.55 | 2 | −0.298919 |
+| `a`, `b`, STOP | 0.45 | 3 | −0.266169 |
+
+Length normalization prefers the **lower-probability, longer action sequence**. The wide beam selects that sequence and reuses the cached `ab` evaluation. A separate fixture checks two equal-length fragment paths converging on `abc`: the higher-likelihood path survives the collision. Character-only and fragment vocabularies use different invented distributions; their scores are **not comparable model likelihoods**.
 
 ## Reproduce without API calls
 
-From a checkout, using Python 3.10 or newer (as used by the [CI workflow](.github/workflows/checks.yml)):
+On a normal CPU laptop with Python 3.10 or newer, no dependencies or credentials:
 
 ```bash
-nice -n 19 python offline_demo.py
+nice -n 19 python offline_demo.py --exhaustive --output results/synthetic-search.json
 nice -n 19 python -m unittest discover -s tests -v
 nice -n 19 python typesafe_llm.py 'Complete a short sentence.' --dry-run
 ```
 
-A normal CPU laptop is enough. Only the Python standard library is needed; no GPU, model download, API key, or paid compute is required. The dry run prints a request, not a generated answer.
+Paid compute and API cost: **$0**. The dry run prints a request, not a generated answer. Tests check complete token paths against independently enumerated paths, call limits, cache reuse, score normalization at character caps, and the committed JSON.
 
-Actual generation requires your own TypeSafe key and account-specific API charges. It was **not run for this change**. The [public preview terms](https://typesafe.ai/terms) restrict benchmark publication, distillation, and competing products. Keep `runs/` private and clarify the applicable terms before running or sharing experiments. Detailed CLI usage, trace formats, source checks, and change history are preserved in [docs/USAGE.md](docs/USAGE.md).
+## Limits and live use
 
-## Limitations
-
-- Choice scores describe our supplied candidates, not native token probabilities, hidden reasoning, or a separately trained language model.
-- The [search diagnostic suite](examples/search_holdout.json) has four short cases. Existing diagnostic suites have already been used for tuning or evaluation; they are not fresh holdouts or evidence of general language quality.
-- Beam search scores each uncached explored prefix, whereas greedy follows one path. More exploration costs more API requests; call caps are not dollar caps.
-- Beam pruning and length normalization are heuristics, not optimality or correctness guarantees. A positive STOP score does not establish a correct answer.
-- Exact matching rejects formatting differences and unfinished outputs. The wrapper does not repair spelling, copying, arithmetic, or stopping failures.
+- The fixtures are small and hand-built to expose search tradeoffs. They do not prove general beam optimality or useful text generation.
+- Choice scores describe supplied candidates, not native token probabilities or hidden reasoning. Adding fragments changes both the choices and the scoring denominator.
+- STOP termination is not answer correctness. Capped unfinished paths are never counted as exhaustive matches.
+- The [four-case search diagnostic](examples/search_holdout.json) has already been used; it is not a fresh holdout.
+- Live results remain private. Actual generation needs an authorized TypeSafe key and account-specific charges; no live calls were made for this work.
 
 ## Built on
 
-TypeSafe's [System One](https://docs.typesafe.ai/concepts/system-one.md) and [Choice API](https://docs.typesafe.ai/primitives/choice.md) provide the external scorer. Beam search, token diversity, and path ranking are local decoder policies, not documented Jev text-generation features. Official protocol, SDK, pricing, and terms references are collected in [docs/SOURCES.md](docs/SOURCES.md).
+TypeSafe's [System One](https://docs.typesafe.ai/concepts/system-one.md) and [Choice API](https://docs.typesafe.ai/primitives/choice.md) supply the external scorer. Beam search and token diversity are local policies, not documented Jev generation features. The [preview terms](https://typesafe.ai/terms) restrict benchmark publication and distillation; clarify applicable terms before any live comparison. CLI details and earlier history are in [docs/USAGE.md](docs/USAGE.md); official references are in [docs/SOURCES.md](docs/SOURCES.md).
+
+Written with AI coding assistance.

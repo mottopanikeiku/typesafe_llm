@@ -9,6 +9,12 @@ import sys
 from pathlib import Path
 
 
+def action_text(vocabulary: dict, label: str) -> str:
+    """Quote emitted text; STOP maps to None, so a literal "STOP" fragment stays quoted."""
+    token = vocabulary.get(label, label)
+    return "STOP" if token is None else repr(token)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("path", type=Path, help="A run directory or its trace.jsonl file.")
@@ -47,14 +53,15 @@ def main(argv: list[str] | None = None) -> int:
                 probabilities = event["raw_probabilities"]
                 total = math.fsum(probabilities.values())
                 normalized = [p / total for p in probabilities.values() if p > 0]
-                entropy = -math.fsum(p * math.log2(p) for p in normalized)
+                # max() turns the -0.0 of a one-hot distribution into 0.0.
+                entropy = max(0.0, -math.fsum(p * math.log2(p) for p in normalized))
                 selected = event["selected_label"]
                 top = sorted(probabilities, key=probabilities.get, reverse=True)[:args.top]
                 vocabulary = event.get("vocabulary", {})
-                alternatives = ", ".join(f"{vocabulary.get(label, label)!r}:{probabilities[label]:.3f}" for label in top)
-                picked_text = vocabulary.get(selected, selected)
-                api_text = vocabulary.get(event["api_choice"], event["api_choice"])
-                print(f"{event['call']:>4}  {picked_text!r:<12}  {api_text!r:<12}  "
+                alternatives = ", ".join(f"{action_text(vocabulary, label)}:{probabilities[label]:.3f}" for label in top)
+                picked_text = action_text(vocabulary, selected)
+                api_text = action_text(vocabulary, event["api_choice"])
+                print(f"{event['call']:>4}  {picked_text:<12}  {api_text:<12}  "
                       f"{probabilities[selected]:>6.3f}   "
                       f"{event['decoding_probabilities'][selected]:>6.3f}   "
                       f"{entropy:>6.2f}   {alternatives}")

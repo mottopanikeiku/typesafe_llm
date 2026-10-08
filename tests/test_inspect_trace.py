@@ -51,6 +51,15 @@ class InspectTraceTests(unittest.TestCase):
         self.assertIn("best complete: 'b'", output)
         self.assertIn("Stop reason: stop; attempted API calls: 4; new characters: 1.", output)
 
+    def test_stop_is_named_and_one_hot_entropy_is_not_negative(self):
+        run_dir = make_run(self.root, "beam")
+        _, output, _ = inspect(str(run_dir))
+        stop_row = output.splitlines()[3].split()
+        # Call 3 scored prefix "b" (after "" and "a"): STOP has probability 1.
+        self.assertEqual(stop_row[:6], ["3", "STOP", "STOP", "1.000", "1.000", "0.00"])
+        self.assertNotIn("None", output.split("Showing")[0])
+        self.assertEqual(inspect_trace.action_text({"TOKEN_0002": "STOP"}, "TOKEN_0002"), "'STOP'")
+
     def test_trace_file_path_and_limit(self):
         run_dir = make_run(self.root, "greedy")
         code, output, _ = inspect(str(run_dir / "trace.jsonl"), "--limit", "1")

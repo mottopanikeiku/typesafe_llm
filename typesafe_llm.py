@@ -445,7 +445,9 @@ def generate(
 
         search_stop_reason = reason
         if beam is not None:
-            checkpoint_beam()
+            # An exhausted frontier was already checkpointed at its last layer.
+            if search_stop_reason != "frontier_exhausted":
+                checkpoint_beam()
             result = beam.result()
             # Only the selected path becomes output; exploration never edits stdout.
             for step in result.steps:

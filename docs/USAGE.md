@@ -367,7 +367,9 @@ search to $L$ new characters can evaluate up to $1 + BL$ prefixes before the
 request cap intervenes. Defaults are width 32, token diversity, 256 attempts,
 and 80 new characters; that budget does not guarantee reaching 80 characters.
 
-The fixed options remain offered at every boundary, including the character cap.
+The fixed options remain offered at every boundary, including the character cap:
+in both modes, a prefix that reaches the cap is still scored so STOP can complete
+it. In greedy mode that costs one more call; a text token chosen there is not emitted.
 Prefix evaluations are cached only within the same run, prompt, context, model,
 instructions, vocabulary, and option order. Cached calls cost no new request.
 HTTP requests are sequential; separate prefixes never share a speculative state.
@@ -421,7 +423,8 @@ The offline suite covers fixed output membership and order, shared benchmark
 vocabularies, diverse and ordinary beam coverage, duplicate tokenizations,
 cache provenance, mid-frontier failure preservation, sampling, malformed scores,
 token boundaries, STOP, interruptions, hard budgets, truncated HTTP bodies,
-credential handling, expected-answer isolation, and completion-aware scoring.
+credential handling, expected-answer isolation, completion-aware scoring, and
+the trace viewer.
 GitHub Actions runs these checks and both CLI dry runs on Python 3.10, 3.12,
 and 3.14, without an API key or paid calls.
 
@@ -447,38 +450,16 @@ separate unfinished outputs from STOP completions. The original four-policy
 example remains available with `python offline_demo.py`. Neither example is a
 live quality measurement.
 
-## Contextual search changes
+## History
 
-- Contextual candidate descriptions with an unchanged output vocabulary.
-- Bounded token-diverse beam search; probability-only beam and greedy controls.
-- Separate live and completed paths, length-normalized sequence scoring, and
-  parent-linked decision provenance without per-branch probability copies.
-- Run-local prefix caching and preservation of observed work at limits/errors.
-- Provisional beam checkpoints, final-path-only output, frontier inspection, and
-  distinct search/output termination reasons.
-- Trace schema 5, campaign schema 3, and a separately frozen diagnostic suite.
+Git history has the details. Three changes matter when reading older runs:
 
-## Fixed-vocabulary changes
-
-- Fixed option labels, descriptions, and membership across every step and prompt.
-- One shared benchmark vocabulary; per-case alphabet overrides are rejected.
-- Single-character default; explicitly configured fragments remain fixed options.
-- Removed dictionary data, proposal stages, and the `--decoder`/`--lexicon` flags.
-- Option shuffling happens once per run rather than changing each request.
-- Trace schema 4 and campaign schema 2 identify the fixed-vocabulary cutover.
-
-## Removed dictionary-assisted decoding
-
-Version 3 introduced dictionary-assisted word shortlists. That changed the
-candidate set as the prefix grew, so it was not a fixed-vocabulary experiment.
-This approach was removed in version 4; its assisted results are not evidence
-of improved character-by-character prediction.
-
-## Earlier wrapper changes
-
-- Current documented model alias with resolved versions retained in traces.
-- Full-prefix candidate scoring instead of bare next-character descriptions.
-- Optional text fragments, character fallback, and the documented Choice limit.
-- Token-aware checkpoints and traces without splitting capped fragments.
-- Bounded benchmark campaigns, strict scoring, and separate holdout cases.
-- Clean errors for truncated HTTP responses, with no automatic retries.
+- Version 3 added dictionary-assisted word shortlists. They changed the candidate
+  set as the prefix grew, so they were not a fixed-vocabulary experiment. Version 4
+  removed them and the `--decoder`/`--lexicon` flags; assisted results are not
+  evidence of improved character-by-character prediction.
+- Trace schema 4 and campaign schema 2 mark the fixed-vocabulary cutover: one
+  option set for every step, prompt, and benchmark case, shuffled at most once per run.
+- Trace schema 5 and campaign schema 3 add contextual candidate descriptions
+  (outputs unchanged), beam search, prefix caching, frontier events, and separate
+  search and output stop reasons.

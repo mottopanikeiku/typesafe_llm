@@ -289,8 +289,23 @@ class DecoderTests(unittest.TestCase):
 
     def test_character_cap(self):
         summary = self.run_fake(max_new_chars=2)
-        self.assertEqual(summary["api_calls_started"], 2)
+        # The capped prefix is still scored; its selected "l" is not emitted.
+        self.assertEqual(summary["api_calls_started"], 3)
         self.assertEqual(summary["stop_reason"], "max_new_chars")
+        self.assertEqual(self.stdout.getvalue(), "co")
+        self.assertEqual(summary["new_characters"], 2)
+
+    def test_greedy_answer_filling_the_cap_can_still_stop(self):
+        summary = self.run_fake(max_new_chars=4)
+        self.assertEqual(self.stdout.getvalue(), "cold")
+        self.assertEqual(summary["stop_reason"], "stop")
+        self.assertEqual(summary["api_calls_started"], 5)
+
+    def test_greedy_cap_still_respects_call_limit(self):
+        summary = self.run_fake(max_new_chars=2, max_calls=2)
+        self.assertEqual(summary["api_calls_started"], 2)
+        self.assertEqual(summary["stop_reason"], "max_calls")
+        self.assertEqual(self.stdout.getvalue(), "co")
 
     def test_continue_prefix(self):
         summary = self.run_fake(prefix="co")
@@ -387,6 +402,22 @@ class DecoderTests(unittest.TestCase):
         self.assertEqual(self.stdout.getvalue(), "a")
         self.assertEqual(summary["stop_reason"], "max_calls")
         self.assertEqual(summary["api_calls_started"], 1)
+
+    def test_beam_records_one_frontier_per_layer_plus_mid_layer_stop(self):
+        self.vocab = m.make_vocabulary("ab")
+        tables = {"": {"a": .6, "b": .4}, "a": {None: 1}, "b": {None: 1}}
+
+        def frontiers():
+            events = [json.loads(line) for line in (self.path / "trace.jsonl").read_text().splitlines()]
+            return [(event["depth"], event["call"]) for event in events if event["event"] == "frontier"]
+
+        summary = self.run_fake(BranchEvaluator(self.vocab, tables), search="beam", beam_width=2)
+        self.assertEqual(summary["search_stop_reason"], "frontier_exhausted")
+        self.assertEqual(frontiers(), [(1, 1), (2, 3)])
+        self.path = Path(self.temp.name) / "capped"
+        self.run_fake(BranchEvaluator(self.vocab, tables), search="beam", beam_width=2, max_calls=2)
+        # Search stopped inside layer 1, so the pending frontier is checkpointed.
+        self.assertEqual(frontiers(), [(1, 1), (1, 2)])
 
     def test_beam_sampling_conflicts_fail_before_any_request(self):
         fake = FakeEvaluator()

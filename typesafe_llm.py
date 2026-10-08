@@ -419,9 +419,8 @@ def generate(
                     reason = "frontier_exhausted"
             else:
                 while calls < config["max_calls"]:
-                    if len(text) - len(prefix) >= config["max_new_chars"]:
-                        reason = "max_new_chars"
-                        break
+                    # Like beam search, still score a prefix at the character
+                    # cap: STOP may complete it; any text token is over the limit.
                     evaluation = evaluate(text)
                     if evaluation is None:
                         reason = "max_calls"
@@ -446,7 +445,9 @@ def generate(
 
         search_stop_reason = reason
         if beam is not None:
-            checkpoint_beam()
+            # An exhausted frontier was already checkpointed at its last layer.
+            if search_stop_reason != "frontier_exhausted":
+                checkpoint_beam()
             result = beam.result()
             # Only the selected path becomes output; exploration never edits stdout.
             for step in result.steps:

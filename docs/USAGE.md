@@ -423,7 +423,8 @@ The offline suite covers fixed output membership and order, shared benchmark
 vocabularies, diverse and ordinary beam coverage, duplicate tokenizations,
 cache provenance, mid-frontier failure preservation, sampling, malformed scores,
 token boundaries, STOP, interruptions, hard budgets, truncated HTTP bodies,
-credential handling, expected-answer isolation, and completion-aware scoring.
+credential handling, expected-answer isolation, completion-aware scoring, and
+the trace viewer.
 GitHub Actions runs these checks and both CLI dry runs on Python 3.10, 3.12,
 and 3.14, without an API key or paid calls.
 

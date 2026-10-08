@@ -289,8 +289,23 @@ class DecoderTests(unittest.TestCase):
 
     def test_character_cap(self):
         summary = self.run_fake(max_new_chars=2)
-        self.assertEqual(summary["api_calls_started"], 2)
+        # The capped prefix is still scored; its selected "l" is not emitted.
+        self.assertEqual(summary["api_calls_started"], 3)
         self.assertEqual(summary["stop_reason"], "max_new_chars")
+        self.assertEqual(self.stdout.getvalue(), "co")
+        self.assertEqual(summary["new_characters"], 2)
+
+    def test_greedy_answer_filling_the_cap_can_still_stop(self):
+        summary = self.run_fake(max_new_chars=4)
+        self.assertEqual(self.stdout.getvalue(), "cold")
+        self.assertEqual(summary["stop_reason"], "stop")
+        self.assertEqual(summary["api_calls_started"], 5)
+
+    def test_greedy_cap_still_respects_call_limit(self):
+        summary = self.run_fake(max_new_chars=2, max_calls=2)
+        self.assertEqual(summary["api_calls_started"], 2)
+        self.assertEqual(summary["stop_reason"], "max_calls")
+        self.assertEqual(self.stdout.getvalue(), "co")
 
     def test_continue_prefix(self):
         summary = self.run_fake(prefix="co")

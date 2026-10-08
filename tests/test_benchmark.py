@@ -171,16 +171,26 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(rejected["aggregate"]["completed_exact_matches"], 0)
 
     def test_character_truncation_never_counts_as_completed_match(self):
+        evaluator = ScriptedEvaluator(["a", "b"])
+        result, _ = self.campaign(evaluator, self.cases(expected=["Pa"], prefix="P"),
+                                  "--max-new-chars", "1")
+        sample = result["samples"][0]
+        self.assertEqual(sample["output"], "Pa")
+        self.assertEqual(sample["status"], "max_new_chars")
+        self.assertTrue(sample["raw_exact_match"])
+        self.assertFalse(sample["completed_exact_match"])
+        self.assertEqual(result["aggregate"]["completed_accuracy"], 0)
+        self.assertEqual(result["aggregate"]["completed"], 0)
+        self.assertEqual(len(evaluator.payloads), 2)
+
+    def test_stop_at_the_character_cap_counts_as_completed_match(self):
         evaluator = ScriptedEvaluator(["a", decoder.STOP])
         result, _ = self.campaign(evaluator, self.cases(expected=["Pa"], prefix="P"),
                                   "--max-new-chars", "1")
         sample = result["samples"][0]
         self.assertEqual(sample["output"], "Pa")
-        self.assertTrue(sample["raw_exact_match"])
-        self.assertFalse(sample["completed_exact_match"])
-        self.assertEqual(result["aggregate"]["completed_accuracy"], 0)
-        self.assertEqual(result["aggregate"]["completed"], 0)
-        self.assertEqual(len(evaluator.payloads), 1)
+        self.assertTrue(sample["completed_exact_match"])
+        self.assertEqual(len(evaluator.payloads), 2)
 
     def test_completed_match_includes_prefix_and_does_not_normalize(self):
         evaluator = ScriptedEvaluator(["a", decoder.STOP])

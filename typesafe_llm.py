@@ -419,9 +419,8 @@ def generate(
                     reason = "frontier_exhausted"
             else:
                 while calls < config["max_calls"]:
-                    if len(text) - len(prefix) >= config["max_new_chars"]:
-                        reason = "max_new_chars"
-                        break
+                    # Like beam search, still score a prefix at the character
+                    # cap: STOP may complete it; any text token is over the limit.
                     evaluation = evaluate(text)
                     if evaluation is None:
                         reason = "max_calls"

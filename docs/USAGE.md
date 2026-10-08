@@ -367,7 +367,9 @@ search to $L$ new characters can evaluate up to $1 + BL$ prefixes before the
 request cap intervenes. Defaults are width 32, token diversity, 256 attempts,
 and 80 new characters; that budget does not guarantee reaching 80 characters.
 
-The fixed options remain offered at every boundary, including the character cap.
+The fixed options remain offered at every boundary, including the character cap:
+in both modes, a prefix that reaches the cap is still scored so STOP can complete
+it. In greedy mode that costs one more call; a text token chosen there is not emitted.
 Prefix evaluations are cached only within the same run, prompt, context, model,
 instructions, vocabulary, and option order. Cached calls cost no new request.
 HTTP requests are sequential; separate prefixes never share a speculative state.
